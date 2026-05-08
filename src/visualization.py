@@ -147,6 +147,7 @@ def plot_trend_line(df, countries, metric, title=None):
     """
     Clean line chart for trend visualization.
     Minimal style, high readability.
+    Fix: legend moved to top-center to avoid overlap with title.
     """
     plot_df = df[df['country'].isin(countries)][['date', 'country', metric]].copy()
     plot_df = plot_df.dropna(subset=[metric])
@@ -168,12 +169,12 @@ def plot_trend_line(df, countries, metric, title=None):
     
     fig.update_layout(
         title={'text': title, 'x': 0.5, 'xanchor': 'center', 
-               'font': {'size': 14, 'color': '#222'}},
-        legend={'orientation': 'h', 'yanchor': 'bottom', 'y': 1.02, 
-                'xanchor': 'right', 'x': 1, 'font': {'size': 10}},
+               'font': {'size': 14, 'color': '#222'}, 'y': 0.95},
+        legend={'orientation': 'h', 'yanchor': 'top', 'y': -0.12, 
+                'xanchor': 'center', 'x': 0.5, 'font': {'size': 10}},
         hovermode='x unified',
         hoverlabel={'bgcolor': 'white', 'font_size': 12, 'bordercolor': '#ccc'},
-        margin={'l': 40, 'r': 20, 't': 40, 'b': 40}
+        margin={'l': 40, 'r': 20, 't': 50, 'b': 60}
     )
     
     return fig
@@ -182,8 +183,13 @@ def plot_trend_line(df, countries, metric, title=None):
 def plot_bar_chart(df, x_col, y_col, title, color_col=None):
     """
     Clean horizontal bar chart for rankings.
+    Fix: drop NA in color column to avoid Plotly sorting error.
     """
     plot_df = df.sort_values(y_col, ascending=True)
+    
+    # Drop rows with NA in color column to avoid Plotly sorting error
+    if color_col and color_col in plot_df.columns:
+        plot_df = plot_df.dropna(subset=[color_col])
     
     fig = px.bar(
         plot_df, x=y_col, y=x_col, color=color_col,
@@ -218,6 +224,7 @@ def plot_bar_chart(df, x_col, y_col, title, color_col=None):
 def plot_dual_axis(df, country, metric_left, metric_right):
     """
     Dual-axis chart comparing two metrics over time.
+    Fix: use matches='x' to keep x-axis synced when zooming.
     """
     country_df = df[df['country'] == country].sort_values('date')
     
@@ -246,6 +253,9 @@ def plot_dual_axis(df, country, metric_left, metric_right):
     _apply_base(fig)
     _apply_axes(fig)
     
+    # Fix: lock x-axis range so both traces share the same zoom
+    fig.update_xaxes(matches='x')
+    
     fig.update_layout(
         title={'text': f'{country}', 'x': 0.5, 'xanchor': 'center',
                'font': {'size': 14, 'color': '#222'}},
@@ -262,6 +272,7 @@ def plot_dual_axis(df, country, metric_left, metric_right):
 def plot_growth_rate(df, country, metric):
     """
     Two-panel chart: values + growth rate.
+    Fix: use matches='x' to keep x-axis synced when zooming.
     """
     from src.data_analysis import growth_rate_analysis
     growth_df = growth_rate_analysis(df, country, metric).dropna()
@@ -294,6 +305,9 @@ def plot_growth_rate(df, country, metric):
     
     _apply_base(fig)
     _apply_axes(fig)
+    
+    # Fix: lock x-axis range so both panels share the same zoom
+    fig.update_xaxes(matches='x')
     
     fig.update_layout(
         title={'text': f'{country}: Growth Analysis', 'x': 0.5, 'xanchor': 'center',
