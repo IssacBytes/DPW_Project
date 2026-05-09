@@ -1,0 +1,13 @@
+import requests
+r = requests.get('http://127.0.0.1:8051', timeout=5)
+print(f'Status: {r.status_code}')
+print(f'Length: {len(r.text)}')
+# Save HTML for inspection
+with open('page_debug.html', 'w', encoding='utf-8') as f:
+    f.write(r.text)
+print('Saved to page_debug.html')
+# Check for key Dash components
+text = r.text
+keywords = ['dash', 'app', 'tab', 'graph', 'figure', 'plotly', 'dropdown', 'slider', 'map', 'choropleth']
+for k in keywords:
+    print(f'  {k}: {k in text}')
