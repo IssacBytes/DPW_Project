@@ -103,6 +103,7 @@ def plot_choropleth_map(df, metric, date_str, title=None):
     
     fig.update_layout(
         margin={'l': 0, 'r': 0, 't': 0, 'b': 0},
+        uirevision=f'global-map-{metric}',
         coloraxis_colorbar={
             'title': {'text': metric.replace('_', ' ').title(), 'font': {'size': 10}},
             'tickformat': ',.0f',

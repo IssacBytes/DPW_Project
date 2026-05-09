@@ -341,7 +341,7 @@ app.clientside_callback(
 | `group-header-{group_id}` | `html.Div` | 分组标题（点击展开/折叠） |
 | `group-arrow-{group_id}` | `html.Span` | 箭头指示器（▾ 展开 / ▸ 折叠） |
 | `group-items-{group_id}` | `html.Div` | 子页面列表容器 |
-| `sidebar-item-{tab_value}` | `html.Div` | 子页面按钮（点击切换内容） |
+| `sidebar-item-{nav_id}` | `html.Div` | 子页面按钮（点击切换内容，`nav_id` 保证复用同一 tab 的入口也有唯一组件 ID） |
 
 ### 6.8.3 顶层容器
 
@@ -492,3 +492,50 @@ app.clientside_callback(
 | **dcc.Interval（定时器）** | 1 个 |
 | **html.Button（按钮）** | 2 个（Exit + Play） |
 | **dcc.DatePickerRange（日期选择）** | 1 个 |
+
+---
+
+## 6.9 扩展版侧栏分组更新
+
+`app_extended.py` 的侧栏按分析任务重新分组，只调整导航结构，不新增或删除分析功能，现有 tab value 和图表回调保持不变。
+
+### Overview
+
+| 页面 | 对应 tab |
+|------|----------|
+| Global Trends | `tab-global` |
+| Summary Statistics | `tab-overview` |
+| Pandemic Timeline | `tab-pipeline` |
+
+### Comparison Analysis
+
+| 页面 | 对应 tab |
+|------|----------|
+| Country Comparison | `tab-compare` |
+| Continent Comparison | `tab-continent` |
+| Rankings | `tab-rankings` |
+
+### Trend Analysis
+
+| 页面 | 对应 tab |
+|------|----------|
+| Time Series | `tab-deepdive` |
+| Moving Average | `tab-ma` |
+| Growth Rate | `tab-deepdive` |
+| Fatality Trend | `tab-fatality` |
+
+`Time Series` 和 `Growth Rate` 当前复用 Country Deep Dive 页面，因此都指向 `tab-deepdive`。侧栏内部使用独立 `nav_id` 区分两个入口，避免 Dash 组件 ID 重复。
+
+### Relationship Analysis
+
+| 页面 | 对应 tab |
+|------|----------|
+| Correlation | `tab-correlation` |
+| Lead-Lag Analysis | `tab-lag` |
+
+### Advanced Analytics
+
+| 页面 | 对应 tab |
+|------|----------|
+| Clustering | `tab-cluster` |
+| Anomaly Detection | `tab-anomaly` |

@@ -13,6 +13,8 @@ import numpy as np
 import os, pickle, time
 import plotly.graph_objects as go
 import plotly.express as px
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
 
 # ── Original imports ──────────────────────────────────────────────────
 from src.data_loader import load_data, get_countries, get_continents, get_date_range, get_numeric_columns
@@ -72,6 +74,17 @@ date_values = df_sorted['date'].values
 print(f"done ({time.time()-t0:.1f}s)")
 print(f"Data: {len(df):,} rows, {len(countries)} countries, {date_min.date()} to {date_max.date()}")
 
+# Precompute country-level cluster inputs once; clustering pages should not scan
+# the full 570k-row time series on every tab switch or k change.
+CLUSTER_FEATURES = [
+    'total_cases_per_million',
+    'total_deaths_per_million',
+    'people_fully_vaccinated_per_hundred',
+    'population',
+]
+CLUSTER_BASE_DF = df.loc[df.groupby('country')['date'].idxmax()].dropna(subset=CLUSTER_FEATURES).copy()
+CLUSTER_CACHE = {}
+
 # ── Constants ─────────────────────────────────────────────────────────
 METRICS = [
     {'id': 'new_cases_smoothed', 'label': 'Daily New Cases', 'group': 'Cases'},
@@ -90,73 +103,120 @@ METRICS = [
 DEFAULT_METRIC = 'new_cases_smoothed'
 DEFAULT_COUNTRIES = ['United States', 'United Kingdom', 'India', 'Brazil', 'Germany']
 
+MA_PERIOD_OPTIONS = [
+    {'label': 'Full Dataset', 'value': 'all'},
+    {'label': '2020 Initial Spread', 'value': '2020_initial'},
+    {'label': '2021 Vaccination / Delta', 'value': '2021_delta'},
+    {'label': '2022 Omicron Wave', 'value': '2022_omicron'},
+    {'label': '2023-2026 Post-Peak Period', 'value': '2023_post_peak'},
+    {'label': 'Latest 180 Days in Dataset', 'value': 'latest_180'},
+]
+
+CORRELATION_METRICS = METRICS + [
+    {'id': 'population_density', 'label': 'Population Density', 'group': 'Demographics'},
+    {'id': 'median_age', 'label': 'Median Age', 'group': 'Demographics'},
+    {'id': 'life_expectancy', 'label': 'Life Expectancy', 'group': 'Demographics'},
+    {'id': 'gdp_per_capita', 'label': 'GDP per Capita', 'group': 'Economy'},
+    {'id': 'diabetes_prevalence', 'label': 'Diabetes Prevalence', 'group': 'Health'},
+    {'id': 'hospital_beds_per_thousand', 'label': 'Hospital Beds per Thousand', 'group': 'Health'},
+    {'id': 'human_development_index', 'label': 'Human Development Index', 'group': 'Economy'},
+]
+
+CORRELATION_COLOR_OPTIONS = [
+    {'label': 'Continent', 'value': 'continent'},
+    {'label': 'Population Size', 'value': 'population_group'},
+    {'label': 'GDP Level', 'value': 'gdp_group'},
+    {'label': 'Median Age Group', 'value': 'age_group'},
+    {'label': 'HDI Level', 'value': 'hdi_group'},
+    {'label': 'Life Expectancy Group', 'value': 'life_expectancy_group'},
+]
+
 # ═══════════════════════════════════════════════════════════════════════
 # Sidebar Navigation Definition
 # ═══════════════════════════════════════════════════════════════════════
 SIDEBAR_GROUPS = [
     {
         'icon': '📊',
-        'label': 'Data Overview',
-        'group_id': 'group-data',
+        'label': 'Overview',
+        'group_id': 'group-overview',
         'items': [
-            {'label': 'Data Pipeline', 'value': 'tab-pipeline'},
-            {'label': 'Overview', 'value': 'tab-overview'},
-            {'label': 'Global Trends', 'value': 'tab-global'},
+            {'label': 'Global Trends', 'nav_id': 'global', 'value': 'tab-global'},
+            {'label': 'Summary Statistics', 'nav_id': 'summary', 'value': 'tab-overview'},
+            {'label': 'Pandemic Timeline', 'nav_id': 'timeline', 'value': 'tab-pipeline'},
         ]
     },
     {
         'icon': '📈',
-        'label': 'Analysis Tools',
-        'group_id': 'group-analysis',
+        'label': 'Comparison Analysis',
+        'group_id': 'group-comparison',
         'items': [
-            {'label': 'Country Comparison', 'value': 'tab-compare'},
-            {'label': 'Country Deep Dive', 'value': 'tab-deepdive'},
-            {'label': 'Rankings', 'value': 'tab-rankings'},
-            {'label': 'Correlation', 'value': 'tab-correlation'},
-            {'label': 'Continent Analysis', 'value': 'tab-continent'},
+            {'label': 'Country Comparison', 'nav_id': 'country-comparison', 'value': 'tab-compare'},
+            {'label': 'Continent Comparison', 'nav_id': 'continent-comparison', 'value': 'tab-continent'},
+            {'label': 'Rankings', 'nav_id': 'rankings', 'value': 'tab-rankings'},
         ]
     },
     {
         'icon': '🔬',
-        'label': 'Advanced',
+        'label': 'Trend Analysis',
+        'group_id': 'group-trend',
+        'items': [
+            {'label': 'Time Series', 'nav_id': 'time-series', 'value': 'tab-deepdive'},
+            {'label': 'Moving Average', 'nav_id': 'moving-average', 'value': 'tab-ma'},
+            {'label': 'Growth Rate', 'nav_id': 'growth-rate', 'value': 'tab-deepdive'},
+            {'label': 'Fatality Trend', 'nav_id': 'fatality-trend', 'value': 'tab-fatality'},
+        ]
+    },
+    {
+        'icon': 'R',
+        'label': 'Relationship Analysis',
+        'group_id': 'group-relationship',
+        'items': [
+            {'label': 'Correlation', 'nav_id': 'correlation', 'value': 'tab-correlation'},
+            {'label': 'Lead-Lag Analysis', 'nav_id': 'lead-lag', 'value': 'tab-lag'},
+        ]
+    },
+    {
+        'icon': 'AI',
+        'label': 'Advanced Analytics',
         'group_id': 'group-advanced',
         'items': [
-            {'label': 'Moving Avg', 'value': 'tab-ma'},
-            {'label': 'Anomalies', 'value': 'tab-anomaly'},
-            {'label': 'Fatality', 'value': 'tab-fatality'},
-            {'label': 'Lead-Lag', 'value': 'tab-lag'},
-            {'label': 'Clusters', 'value': 'tab-cluster'},
+            {'label': 'Clustering', 'nav_id': 'clustering', 'value': 'tab-cluster'},
+            {'label': 'Anomaly Detection', 'nav_id': 'anomaly-detection', 'value': 'tab-anomaly'},
         ]
     }
 ]
 
 ALL_TAB_VALUES = [item['value'] for group in SIDEBAR_GROUPS for item in group['items']]
-DEFAULT_TAB = 'tab-overview'
+DEFAULT_TAB = 'tab-global'
+DEFAULT_NAV = 'global'
 
 SIDEBAR_ICON_BY_GROUP = {
-    'group-data': 'D',
-    'group-analysis': 'A',
-    'group-advanced': 'X',
+    'group-overview': 'O',
+    'group-comparison': 'C',
+    'group-trend': 'T',
+    'group-relationship': 'R',
+    'group-advanced': 'AI',
 }
-SHORT_LABEL_BY_TAB = {
-    'tab-pipeline': 'Pipe',
-    'tab-overview': 'Over',
-    'tab-global': 'Glob',
-    'tab-compare': 'Comp',
-    'tab-deepdive': 'Deep',
-    'tab-rankings': 'Rank',
-    'tab-correlation': 'Corr',
-    'tab-continent': 'Cont',
-    'tab-ma': 'Mov',
-    'tab-anomaly': 'Anom',
-    'tab-fatality': 'Fatal',
-    'tab-lag': 'Lag',
-    'tab-cluster': 'Clus',
+SHORT_LABEL_BY_NAV = {
+    'global': 'Global',
+    'summary': 'Stats',
+    'timeline': 'Time',
+    'country-comparison': 'Cntry',
+    'continent-comparison': 'Cont',
+    'rankings': 'Rank',
+    'time-series': 'Series',
+    'moving-average': 'MA',
+    'growth-rate': 'Growth',
+    'fatality-trend': 'Fatal',
+    'correlation': 'Corr',
+    'lead-lag': 'Lag',
+    'clustering': 'Clus',
+    'anomaly-detection': 'Anom',
 }
 for _group in SIDEBAR_GROUPS:
     _group['icon'] = SIDEBAR_ICON_BY_GROUP[_group['group_id']]
     for _item in _group['items']:
-        _item['short'] = SHORT_LABEL_BY_TAB[_item['value']]
+        _item['short'] = SHORT_LABEL_BY_NAV[_item['nav_id']]
 ALL_TAB_ITEMS = [item for group in SIDEBAR_GROUPS for item in group['items']]
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -279,9 +339,9 @@ _collapsed_children = [
 ] + [
     html.Div(
         _item['short'],
-        id=f'collapsed-item-{_item["value"]}',
+        id=f'collapsed-item-{_item["nav_id"]}',
         n_clicks=0,
-        style=collapsed_item_style(_item['value'] == DEFAULT_TAB),
+        style=collapsed_item_style(_item['nav_id'] == DEFAULT_NAV),
         title=_item['label']
     )
     for _item in ALL_TAB_ITEMS
@@ -310,9 +370,9 @@ for _gi, _group in enumerate(SIDEBAR_GROUPS):
         _item_divs.append(
             html.Div(
                 _item['label'],
-                id=f'sidebar-item-{_item["value"]}',
+                id=f'sidebar-item-{_item["nav_id"]}',
                 n_clicks=0,
-                style=sidebar_item_style(_item['value'] == DEFAULT_TAB)
+                style=sidebar_item_style(_item['nav_id'] == DEFAULT_NAV)
             )
         )
     _expanded_children.append(
@@ -339,7 +399,7 @@ _sidebar = html.Div([
 })
 
 app.layout = html.Div([
-    dcc.Store(id='sidebar-state', data={'collapsed': False, 'active_tab': DEFAULT_TAB}),
+    dcc.Store(id='sidebar-state', data={'collapsed': False, 'active_tab': DEFAULT_TAB, 'active_nav': DEFAULT_NAV}),
     dcc.Store(id='group-states', data={group['group_id']: (gi == 0) for gi, group in enumerate(SIDEBAR_GROUPS)}),
 
     html.Div([
@@ -410,13 +470,13 @@ def stat_card(title, value, subtitle):
     Output('sidebar-state', 'data'),
     [Input('sidebar-toggle', 'n_clicks'),
      Input('sidebar-toggle-collapsed', 'n_clicks')] +
-    [Input(f'sidebar-item-{item["value"]}', 'n_clicks') for item in ALL_TAB_ITEMS] +
-    [Input(f'collapsed-item-{item["value"]}', 'n_clicks') for item in ALL_TAB_ITEMS],
+    [Input(f'sidebar-item-{item["nav_id"]}', 'n_clicks') for item in ALL_TAB_ITEMS] +
+    [Input(f'collapsed-item-{item["nav_id"]}', 'n_clicks') for item in ALL_TAB_ITEMS],
     State('sidebar-state', 'data'),
     prevent_initial_call=True
 )
 def update_sidebar_state(*args):
-    state = dict(args[-1] or {'collapsed': False, 'active_tab': DEFAULT_TAB})
+    state = dict(args[-1] or {'collapsed': False, 'active_tab': DEFAULT_TAB, 'active_nav': DEFAULT_NAV})
     trigger_id = dash.callback_context.triggered[0]['prop_id'].split('.')[0]
 
     if trigger_id in ('sidebar-toggle', 'sidebar-toggle-collapsed'):
@@ -424,8 +484,9 @@ def update_sidebar_state(*args):
         return state
 
     for item in ALL_TAB_ITEMS:
-        if trigger_id in (f'sidebar-item-{item["value"]}', f'collapsed-item-{item["value"]}'):
+        if trigger_id in (f'sidebar-item-{item["nav_id"]}', f'collapsed-item-{item["nav_id"]}'):
             state['active_tab'] = item['value']
+            state['active_nav'] = item['nav_id']
             return state
 
     return dash.no_update
@@ -435,14 +496,14 @@ def update_sidebar_state(*args):
     [Output('sidebar-container', 'style'),
      Output('sidebar-collapsed', 'style'),
      Output('sidebar-expanded', 'style')] +
-    [Output(f'sidebar-item-{item["value"]}', 'style') for item in ALL_TAB_ITEMS] +
-    [Output(f'collapsed-item-{item["value"]}', 'style') for item in ALL_TAB_ITEMS],
+    [Output(f'sidebar-item-{item["nav_id"]}', 'style') for item in ALL_TAB_ITEMS] +
+    [Output(f'collapsed-item-{item["nav_id"]}', 'style') for item in ALL_TAB_ITEMS],
     Input('sidebar-state', 'data')
 )
 def sync_sidebar_layout(state):
-    state = state or {'collapsed': False, 'active_tab': DEFAULT_TAB}
+    state = state or {'collapsed': False, 'active_tab': DEFAULT_TAB, 'active_nav': DEFAULT_NAV}
     collapsed = state.get('collapsed', False)
-    active_tab = state.get('active_tab', DEFAULT_TAB)
+    active_nav = state.get('active_nav', DEFAULT_NAV)
 
     expanded_style = {'display': 'none'} if collapsed else {
         'display': 'flex', 'flexDirection': 'column', 'height': '100%'
@@ -456,8 +517,8 @@ def sync_sidebar_layout(state):
 
     return (
         [sidebar_container_style(collapsed), collapsed_style, expanded_style] +
-        [sidebar_item_style(item['value'] == active_tab) for item in ALL_TAB_ITEMS] +
-        [collapsed_item_style(item['value'] == active_tab) for item in ALL_TAB_ITEMS]
+        [sidebar_item_style(item['nav_id'] == active_nav) for item in ALL_TAB_ITEMS] +
+        [collapsed_item_style(item['nav_id'] == active_nav) for item in ALL_TAB_ITEMS]
     )
 
 
@@ -874,27 +935,115 @@ def build_rankings(metric):
     ])
 
 
+def metric_label(metric):
+    return next((m['label'] for m in CORRELATION_METRICS if m['id'] == metric), metric)
+
+
+def default_correlation_y(metric):
+    if 'case' in metric.lower():
+        return 'new_deaths_smoothed'
+    if 'death' in metric.lower():
+        return 'new_cases_smoothed'
+    if 'vaccin' in metric.lower():
+        return 'new_cases_smoothed_per_million'
+    if metric == 'gdp_per_capita':
+        return 'total_deaths_per_million'
+    if metric in ('median_age', 'life_expectancy', 'human_development_index'):
+        return 'total_cases_per_million'
+    return 'new_cases_smoothed'
+
+
+def add_correlation_groups(latest):
+    plot_df = latest.copy()
+
+    plot_df['population_group'] = pd.cut(
+        plot_df['population'],
+        bins=[0, 1_000_000, 10_000_000, 50_000_000, 200_000_000, np.inf],
+        labels=['<1M', '1M-10M', '10M-50M', '50M-200M', '200M+']
+    )
+    plot_df['gdp_group'] = pd.cut(
+        plot_df['gdp_per_capita'],
+        bins=[0, 5_000, 15_000, 35_000, np.inf],
+        labels=['Low GDP', 'Lower-middle GDP', 'Upper-middle GDP', 'High GDP']
+    )
+    plot_df['age_group'] = pd.cut(
+        plot_df['median_age'],
+        bins=[0, 25, 35, 45, np.inf],
+        labels=['Young', 'Mid-age', 'Older', 'Oldest']
+    )
+    plot_df['hdi_group'] = pd.cut(
+        plot_df['human_development_index'],
+        bins=[0, 0.55, 0.7, 0.8, np.inf],
+        labels=['Low HDI', 'Medium HDI', 'High HDI', 'Very high HDI']
+    )
+    plot_df['life_expectancy_group'] = pd.cut(
+        plot_df['life_expectancy'],
+        bins=[0, 65, 75, 82, np.inf],
+        labels=['<65', '65-75', '75-82', '82+']
+    )
+    return plot_df
+
+
+def make_correlation_figure(x_metric, y_metric, color_col):
+    latest = df.loc[df.groupby('country')['date'].idxmax()].copy()
+    latest = add_correlation_groups(latest)
+
+    required = [x_metric, y_metric]
+    if color_col:
+        required.append(color_col)
+    plot_df = latest.dropna(subset=required)
+
+    return plot_scatter(
+        plot_df,
+        x_col=x_metric,
+        y_col=y_metric,
+        color_col=color_col,
+        title=f'{metric_label(x_metric)} vs {metric_label(y_metric)}'
+    )
+
+
 def build_correlation(metric):
     """Correlation tab."""
-    metric_label = next((m['label'] for m in METRICS if m['id'] == metric), metric)
-    latest = df.loc[df.groupby('country')['date'].idxmax()].copy()
-    if 'case' in metric.lower():
-        compare = 'new_deaths_smoothed'
-    elif 'death' in metric.lower():
-        compare = 'new_cases_smoothed'
-    elif 'vaccin' in metric.lower():
-        compare = 'new_cases_smoothed_per_million'
-    else:
-        compare = 'new_cases_smoothed'
-    compare_label = next((m['label'] for m in METRICS if m['id'] == compare), compare)
-    plot_df = latest.dropna(subset=[metric, compare, 'continent'])
+    compare = default_correlation_y(metric)
     return html.Div([
         html.Div([
+            html.Div([
+                html.Span('X Metric:', style={'fontSize': '12px', 'color': '#666', 'marginRight': '6px'}),
+                dcc.Dropdown(
+                    id='corr-x',
+                    options=[{'label': m['label'], 'value': m['id']} for m in CORRELATION_METRICS if m['id'] in df.columns],
+                    value=metric if metric in df.columns else 'new_cases_smoothed',
+                    clearable=False,
+                    style={'width': '260px', 'fontSize': '13px'}
+                )
+            ], style={'display': 'flex', 'alignItems': 'center'}),
+            html.Div([
+                html.Span('Y Metric:', style={'fontSize': '12px', 'color': '#666', 'marginRight': '6px'}),
+                dcc.Dropdown(
+                    id='corr-y',
+                    options=[{'label': m['label'], 'value': m['id']} for m in CORRELATION_METRICS if m['id'] in df.columns],
+                    value=compare,
+                    clearable=False,
+                    style={'width': '260px', 'fontSize': '13px'}
+                )
+            ], style={'display': 'flex', 'alignItems': 'center'}),
+            html.Div([
+                html.Span('Color by:', style={'fontSize': '12px', 'color': '#666', 'marginRight': '6px'}),
+                dcc.Dropdown(
+                    id='corr-color',
+                    options=CORRELATION_COLOR_OPTIONS,
+                    value='continent',
+                    clearable=False,
+                    style={'width': '220px', 'fontSize': '13px'}
+                )
+            ], style={'display': 'flex', 'alignItems': 'center'}),
+        ], style={'display': 'flex', 'gap': '16px', 'alignItems': 'center',
+                  'flexWrap': 'wrap', 'marginBottom': '12px'}),
+        html.Div([
             dcc.Graph(
-                figure=plot_scatter(plot_df, x_col=metric, y_col=compare,
-                                   color_col='continent',
-                                   title=f'{metric_label} vs {compare_label}'),
-                style={'height': '500px'}, config=PLOTLY_CONFIG
+                id='correlation-chart',
+                figure=make_correlation_figure(metric, compare, 'continent'),
+                style={'height': '560px'}, config=PLOTLY_CONFIG
             )
         ], style={'background': '#fff', 'padding': '16px', 'borderRadius': '4px',
                   'border': '1px solid #e8e8e8'})
@@ -933,28 +1082,170 @@ def empty_figure(message='No data available'):
     return fig
 
 
-def make_moving_average_figure(country, metric):
-    ma_df = moving_average(df, country, metric)
-    if ma_df.empty:
-        return empty_figure('No moving average data available')
+def moving_average_base_series(country, metric):
+    country_df = df[df['country'] == country][['date', metric]].copy()
+    country_df = country_df.sort_values('date').dropna(subset=[metric])
+    if country_df.empty:
+        return country_df, metric, metric_label(metric), False
 
-    metric_label = next((m['label'] for m in METRICS if m['id'] == metric), metric)
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=ma_df['date'], y=ma_df[metric], mode='lines',
-        name='Raw', line={'color': '#b0b0b0', 'width': 1}
-    ))
+    base_metric = metric
+    value_label = metric_label(metric)
+    is_derived = False
+
+    if metric.endswith('_smoothed'):
+        candidate = metric.replace('_smoothed', '')
+        if candidate in df.columns:
+            base_metric = candidate
+            country_df = df[df['country'] == country][['date', base_metric]].copy()
+            country_df = country_df.sort_values('date').dropna(subset=[base_metric])
+            value_label = metric_label(base_metric)
+    elif metric.startswith('total_'):
+        country_df['daily_change'] = country_df[metric].diff().clip(lower=0)
+        base_metric = 'daily_change'
+        value_label = f'Daily Change in {metric_label(metric)}'
+        is_derived = True
+
+    country_df = country_df[['date', base_metric]].copy()
     for window in [7, 14, 30]:
-        col = f'ma_{window}d'
-        if col in ma_df.columns:
-            fig.add_trace(go.Scatter(x=ma_df['date'], y=ma_df[col], mode='lines', name=f'{window}-day MA'))
+        country_df[f'ma_{window}d'] = country_df[base_metric].rolling(window=window, min_periods=1).mean()
+    country_df['ma_diff_7_30'] = country_df['ma_7d'] - country_df['ma_30d']
+    return country_df, base_metric, value_label, is_derived
+
+
+def ma_range_label(view_range):
+    return next((option['label'] for option in MA_PERIOD_OPTIONS if option['value'] == view_range), 'Full Dataset')
+
+
+def ma_range_bounds(ma_df, view_range):
+    if ma_df.empty:
+        return None, None
+
+    data_min = ma_df['date'].min()
+    data_max = ma_df['date'].max()
+    period_bounds = {
+        '2020_initial': (pd.Timestamp('2020-01-01'), pd.Timestamp('2020-12-31')),
+        '2021_delta': (pd.Timestamp('2021-01-01'), pd.Timestamp('2021-12-31')),
+        '2022_omicron': (pd.Timestamp('2022-01-01'), pd.Timestamp('2022-12-31')),
+        '2023_post_peak': (pd.Timestamp('2023-01-01'), data_max),
+        'latest_180': (data_max - pd.Timedelta(days=179), data_max),
+    }
+
+    start, end = period_bounds.get(view_range, (data_min, data_max))
+    return max(start, data_min), min(end, data_max)
+
+
+def filter_ma_range(ma_df, view_range):
+    if ma_df.empty or view_range == 'all':
+        return ma_df
+    start, end = ma_range_bounds(ma_df, view_range)
+    if start is None or end is None:
+        return ma_df
+    return ma_df[(ma_df['date'] >= start) & (ma_df['date'] <= end)]
+
+
+def style_ma_figure(fig, title, height=360):
     fig.update_layout(
-        title=f'{metric_label} Moving Average - {country}',
+        title=title,
         template='plotly_white',
-        margin={'l': 40, 'r': 20, 't': 50, 'b': 40},
-        legend={'orientation': 'h'}
+        hovermode='x unified',
+        height=height,
+        margin={'l': 60, 'r': 24, 't': 54, 'b': 46},
+        legend={'orientation': 'h', 'yanchor': 'bottom', 'y': 1.02, 'xanchor': 'right', 'x': 1}
     )
+    fig.update_xaxes(gridcolor='#e8e8e8')
+    fig.update_yaxes(gridcolor='#e8e8e8')
     return fig
+
+
+def ma_trend_summary(latest):
+    ma_7 = latest['ma_7d']
+    ma_30 = latest['ma_30d']
+    diff = latest['ma_diff_7_30']
+
+    if pd.isna(ma_7) or pd.isna(ma_30):
+        return 'Stable', 'insufficient data', diff
+    if ma_30 == 0:
+        if ma_7 > 0:
+            return 'Rising', '30-day baseline is zero', diff
+        return 'Stable', 'both averages are zero', diff
+    if ma_7 > ma_30 * 1.05:
+        status = 'Rising'
+    elif ma_7 < ma_30 * 0.95:
+        status = 'Falling'
+    else:
+        status = 'Stable'
+    pct_diff = (diff / ma_30) * 100
+    return status, f'{pct_diff:+.1f}% vs 30-day MA', diff
+
+
+def latest_active_ma_row(ma_df, base_metric):
+    raw_nonzero_df = ma_df[ma_df[base_metric].fillna(0) != 0]
+    if not raw_nonzero_df.empty:
+        return raw_nonzero_df.iloc[-1]
+    ma_nonzero_df = ma_df[ma_df['ma_7d'].fillna(0) != 0]
+    if not ma_nonzero_df.empty:
+        return ma_nonzero_df.iloc[-1]
+    return ma_df.iloc[-1]
+
+
+def make_moving_average_outputs(country, metric, view_range='all', show_raw=True):
+    ma_df, base_metric, value_label, is_derived = moving_average_base_series(country, metric)
+    if ma_df.empty:
+        empty = empty_figure('No moving average data available')
+        return empty, empty, empty, []
+
+    plot_df = filter_ma_range(ma_df, view_range)
+    if plot_df.empty:
+        plot_df = ma_df
+
+    range_label = ma_range_label(view_range)
+    main_fig = go.Figure()
+    if show_raw:
+        main_fig.add_trace(go.Scatter(
+            x=plot_df['date'], y=plot_df[base_metric], mode='lines',
+            name='Raw daily value' if not is_derived else 'Daily change',
+            line={'color': 'rgba(120,120,120,0.35)', 'width': 1}
+        ))
+    main_fig.add_trace(go.Scatter(x=plot_df['date'], y=plot_df['ma_7d'], mode='lines',
+                                  name='7-day MA', line={'color': '#2a4d8f', 'width': 1.8}))
+    main_fig.add_trace(go.Scatter(x=plot_df['date'], y=plot_df['ma_30d'], mode='lines',
+                                  name='30-day MA', line={'color': '#b91f1f', 'width': 1.8}))
+    style_ma_figure(main_fig, f'Trend Overview: {value_label} - {country} ({range_label})', height=420)
+
+    window_fig = go.Figure()
+    for window, color in [(7, '#2a4d8f'), (14, '#1a7a3a'), (30, '#b91f1f')]:
+        window_fig.add_trace(go.Scatter(
+            x=plot_df['date'], y=plot_df[f'ma_{window}d'], mode='lines',
+            name=f'{window}-day MA', line={'color': color, 'width': 1.8}
+        ))
+    style_ma_figure(window_fig, f'Window Comparison: {range_label}', height=340)
+
+    diff_fig = go.Figure()
+    diff_fig.add_trace(go.Bar(
+        x=plot_df['date'], y=plot_df['ma_diff_7_30'],
+        name='7-day minus 30-day',
+        marker_color=np.where(plot_df['ma_diff_7_30'] >= 0, '#b91f1f', '#2a4d8f')
+    ))
+    diff_fig.add_hline(y=0, line_width=1, line_dash='dash', line_color='#777')
+    style_ma_figure(diff_fig, f'Momentum: 7-day MA minus 30-day MA ({range_label})', height=300)
+
+    selected_valid_df = plot_df.dropna(subset=[base_metric, 'ma_7d', 'ma_30d'])
+    if selected_valid_df.empty:
+        selected_valid_df = ma_df.dropna(subset=[base_metric, 'ma_7d', 'ma_30d'])
+    latest = latest_active_ma_row(selected_valid_df, base_metric)
+    peak_source = selected_valid_df
+    peak = peak_source.loc[peak_source['ma_7d'].idxmax()]
+    days_since_peak = max((latest['date'] - peak['date']).days, 0)
+    trend_status, trend_detail, diff = ma_trend_summary(latest)
+    stats_cards = [
+        stat_card('Latest Raw', f'{latest[base_metric]:,.0f}', value_label),
+        stat_card('Latest 7-day MA', f'{latest["ma_7d"]:,.0f}', 'short-term trend'),
+        stat_card('Latest 30-day MA', f'{latest["ma_30d"]:,.0f}', 'long-term baseline'),
+        stat_card('7 vs 30 Difference', f'{diff:,.0f}', trend_detail),
+        stat_card('Peak 7-day MA', f'{peak["ma_7d"]:,.0f}', str(peak['date'].date())),
+        stat_card('Trend Status', trend_status, f'{days_since_peak} days since peak'),
+    ]
+    return main_fig, window_fig, diff_fig, stats_cards
 
 
 def make_anomaly_figure(country, metric, window=14, threshold=2.0):
@@ -1029,8 +1320,26 @@ def make_lag_figure(country, x_metric, y_metric):
     return fig
 
 
+def get_cluster_df(k):
+    if k not in CLUSTER_CACHE:
+        if CLUSTER_BASE_DF.empty:
+            CLUSTER_CACHE[k] = CLUSTER_BASE_DF.copy()
+        else:
+            clust_df = CLUSTER_BASE_DF.copy()
+            scaler = StandardScaler()
+            scaled = scaler.fit_transform(clust_df[CLUSTER_FEATURES].fillna(0))
+            kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+            clust_df['cluster'] = kmeans.fit_predict(scaled)
+            CLUSTER_CACHE[k] = clust_df
+    return CLUSTER_CACHE[k]
+
+
+for _cluster_k in range(3, 8):
+    get_cluster_df(_cluster_k)
+
+
 def make_cluster_outputs(k):
-    cluster_df = simple_clustering(df, n_clusters=k)
+    cluster_df = get_cluster_df(k)
     if cluster_df.empty:
         return empty_figure('No clustering data available'), []
 
@@ -1068,13 +1377,34 @@ def make_cluster_outputs(k):
 
 def build_ma_tab(metric, country):
     """Moving Average tab."""
-    fig = make_moving_average_figure(country, metric)
+    main_fig, recent_fig, diff_fig, stats_cards = make_moving_average_outputs(country, metric)
     return html.Div([
-        html.Div(f'Moving Average: {country}', style={'fontSize': '15px', 'fontWeight': '600',
+        html.Div(f'Moving Average Trend Analysis: {country}', style={'fontSize': '15px', 'fontWeight': '600',
                  'color': '#444', 'marginBottom': '12px',
                  'borderBottom': '1px solid #e8e8e8', 'paddingBottom': '8px'}),
         html.Div([
-            dcc.Graph(id='ma-chart', figure=fig, style={'height': '450px'}, config=PLOTLY_CONFIG)
+            html.Div([
+                html.Span('View Range:', style={'fontSize': '12px', 'color': '#666', 'marginRight': '6px'}),
+                dcc.Dropdown(
+                    id='ma-range',
+                    options=MA_PERIOD_OPTIONS,
+                    value='all',
+                    clearable=False,
+                    style={'width': '260px', 'fontSize': '13px', 'display': 'inline-block'}
+                ),
+                dcc.Checklist(
+                    id='ma-show-raw',
+                    options=[{'label': 'Show Raw', 'value': 'raw'}],
+                    value=['raw'],
+                    inputStyle={'marginRight': '6px'},
+                    labelStyle={'fontSize': '12px', 'color': '#666', 'marginLeft': '16px'}
+                ),
+            ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '12px'}),
+            html.Div(id='ma-stats', children=stats_cards,
+                     style={'display': 'flex', 'gap': '12px', 'flexWrap': 'wrap', 'marginBottom': '12px'}),
+            dcc.Graph(id='ma-main-chart', figure=main_fig, style={'height': '420px'}, config=PLOTLY_CONFIG),
+            dcc.Graph(id='ma-recent-chart', figure=recent_fig, style={'height': '340px'}, config=PLOTLY_CONFIG),
+            dcc.Graph(id='ma-diff-chart', figure=diff_fig, style={'height': '300px'}, config=PLOTLY_CONFIG)
         ], style={'background': '#fff', 'padding': '16px', 'borderRadius': '4px',
                   'border': '1px solid #e8e8e8'})
     ])
@@ -1254,6 +1584,36 @@ def advance_play(n_intervals, current):
     if next_val >= len(MONTHLY_DATES):
         return 0
     return next_val
+
+
+# Correlation tab callback
+@app.callback(
+    Output('correlation-chart', 'figure'),
+    [Input('corr-x', 'value'),
+     Input('corr-y', 'value'),
+     Input('corr-color', 'value')]
+)
+def update_correlation_chart(x_metric, y_metric, color_col):
+    return make_correlation_figure(x_metric, y_metric, color_col)
+
+
+# Moving Average tab callback
+@app.callback(
+    [Output('ma-main-chart', 'figure'),
+     Output('ma-recent-chart', 'figure'),
+     Output('ma-diff-chart', 'figure'),
+     Output('ma-stats', 'children')],
+    [Input('global-metric', 'value'),
+     Input('global-country', 'value'),
+     Input('ma-range', 'value'),
+     Input('ma-show-raw', 'value')]
+)
+def update_moving_average(metric, country, view_range, show_raw_values):
+    show_raw = bool(show_raw_values and 'raw' in show_raw_values)
+    main_fig, recent_fig, diff_fig, stats_cards = make_moving_average_outputs(
+        country, metric, view_range=view_range, show_raw=show_raw
+    )
+    return main_fig, recent_fig, diff_fig, stats_cards
 
 
 # Anomaly tab callback
