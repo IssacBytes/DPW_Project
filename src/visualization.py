@@ -55,6 +55,14 @@ def plot_choropleth_map(df, metric, date_str, title=None):
     Scientific color scale, clean borders.
     """
     map_df = df[df['date'] == date_str].copy() if date_str else df
+
+    # Render Taiwan with the same choropleth value as China on the map.
+    # This only affects map coloring; source data and statistics remain unchanged.
+    if {'country', 'code', metric}.issubset(map_df.columns):
+        china_values = map_df.loc[map_df['country'].eq('China'), metric].dropna()
+        taiwan_mask = map_df['country'].eq('Taiwan') | map_df['code'].eq('TWN')
+        if not china_values.empty and taiwan_mask.any():
+            map_df.loc[taiwan_mask, metric] = china_values.iloc[0]
     
     # Determine color scale based on metric type
     if 'death' in metric.lower():
@@ -83,6 +91,7 @@ def plot_choropleth_map(df, metric, date_str, title=None):
     
     fig.update_geos(
         projection_type='natural earth',
+        projection_scale=1.28,
         showcountries=True, countrycolor='rgba(180,180,180,0.5)',
         showocean=True, oceancolor='#f0f2f5',
         showland=True, landcolor='#f5f5f5',
@@ -97,9 +106,9 @@ def plot_choropleth_map(df, metric, date_str, title=None):
         coloraxis_colorbar={
             'title': {'text': metric.replace('_', ' ').title(), 'font': {'size': 10}},
             'tickformat': ',.0f',
-            'len': 0.4,
+            'len': 0.48,
             'thickness': 10,
-            'x': 1.02,
+            'x': 0.97,
             'yanchor': 'middle',
             'y': 0.5
         },
@@ -109,8 +118,9 @@ def plot_choropleth_map(df, metric, date_str, title=None):
             'font_family': 'Arial',
             'bordercolor': '#ccc'
         },
-        paper_bgcolor='#fafafa',
-        geo={'bgcolor': '#fafafa'}
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        geo={'bgcolor': 'rgba(0,0,0,0)', 'domain': {'x': [0, 0.95], 'y': [0, 1]}}
     )
     
     return fig
@@ -258,12 +268,15 @@ def plot_dual_axis(df, country, metric_left, metric_right):
     
     fig.update_layout(
         title={'text': f'{country}', 'x': 0.5, 'xanchor': 'center',
+               'y': 0.98, 'yanchor': 'top',
                'font': {'size': 14, 'color': '#222'}},
-        legend={'orientation': 'h', 'yanchor': 'bottom', 'y': 1.02,
-                'xanchor': 'right', 'x': 1, 'font': {'size': 10}},
+        legend={'orientation': 'h', 'yanchor': 'top', 'y': -0.16,
+                'xanchor': 'center', 'x': 0.5, 'font': {'size': 11},
+                'bgcolor': 'rgba(255,255,255,0.85)'},
         hovermode='x unified',
         hoverlabel={'bgcolor': 'white', 'font_size': 12, 'bordercolor': '#ccc'},
-        margin={'l': 40, 'r': 40, 't': 40, 'b': 40}
+        height=480,
+        margin={'l': 60, 'r': 78, 't': 58, 'b': 96}
     )
     
     return fig
@@ -279,7 +292,7 @@ def plot_growth_rate(df, country, metric):
     
     fig = make_subplots(
         rows=2, cols=1, shared_xaxes=True,
-        vertical_spacing=0.08,
+        vertical_spacing=0.14,
         subplot_titles=('Daily Values', 'Daily Growth Rate (%)')
     )
     
@@ -314,9 +327,10 @@ def plot_growth_rate(df, country, metric):
                'font': {'size': 14, 'color': '#222'}},
         hovermode='x unified',
         hoverlabel={'bgcolor': 'white', 'font_size': 12, 'bordercolor': '#ccc'},
-        height=400,
-        margin={'l': 40, 'r': 20, 't': 40, 'b': 40}
+        height=560,
+        margin={'l': 60, 'r': 28, 't': 88, 'b': 48}
     )
+    fig.update_annotations(font={'size': 13, 'color': '#222'})
     
     return fig
 

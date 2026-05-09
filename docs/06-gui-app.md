@@ -279,3 +279,216 @@ app.clientside_callback(
 | **二分查找过滤** | `np.searchsorted()` 实现 57 万行数据的快速日期过滤 |
 | **时间轴采样** | 每月采样一个日期，减少滑块卡顿 |
 | **关闭 debug 模式** | 避免 Flask 双重重载 |
+
+---
+
+## 6.8 扩展版组件清单（`app_extended.py`）
+
+扩展版在基础版 8 个标签页之上新增 5 个高级分析标签页，共 13 个标签页。布局采用**左侧可折叠侧栏导航**替代传统的横向 `dcc.Tabs`。
+
+### 6.8.1 布局结构
+
+```
+┌──────────┬──────────────────────────────────────────┐
+│  侧栏    │  Header (标题 + Exit)                     │
+│  (可折叠) ├──────────────────────────────────────────┤
+│          │  全局控制栏 (Metric | Country | Compare)   │
+│  📊 数据  ├──────────────────────────────────────────┤
+│  ├─Pipeline│                                         │
+│  ├─Overview│  tab-content (内容区)                   │
+│  └─Global │                                         │
+│  📈 分析  │                                         │
+│  ├─Compare│                                         │
+│  ├─DeepDive│                                        │
+│  ├─Rankings│                                        │
+│  ├─Correl.│                                         │
+│  └─Continent│                                       │
+│  🔬 高级  │                                         │
+│  ├─MovAvg │                                         │
+│  ├─Anomaly│                                         │
+│  ├─Fatality│                                        │
+│  ├─LeadLag│                                         │
+│  └─Cluster│                                         │
+│          │  Footer                                   │
+└──────────┴──────────────────────────────────────────┘
+```
+
+### 6.8.2 侧栏导航（Sidebar）
+
+侧栏可折叠为窄条（仅显示分组图标），点击 `◀`/`▶` 按钮切换。
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| `sidebar-container` | `html.Div` | 侧栏容器（深色背景，flex 列布局） |
+| `sidebar-collapsed` | `html.Div` | 折叠状态（仅显示 📊 📈 🔬 图标） |
+| `sidebar-expanded` | `html.Div` | 展开状态（完整导航面板） |
+| `sidebar-toggle` | `html.Div` | 折叠/展开切换按钮（◀ / ▶） |
+| `sidebar-state` | `dcc.Store` | 存储侧栏状态（collapsed / active_tab） |
+| `group-states` | `dcc.Store` | 存储各分组展开/折叠状态 |
+
+**3 个导航分组：**
+
+| 分组 | 图标 | 子页面 |
+|------|:----:|--------|
+| **Data Overview** | 📊 | Data Pipeline, Overview, Global Trends |
+| **Analysis Tools** | 📈 | Country Comparison, Country Deep Dive, Rankings, Correlation, Continent Analysis |
+| **Advanced** | 🔬 | Moving Avg, Anomalies, Fatality, Lead-Lag, Clusters |
+
+**分组交互组件：**
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| `group-header-{group_id}` | `html.Div` | 分组标题（点击展开/折叠） |
+| `group-arrow-{group_id}` | `html.Span` | 箭头指示器（▾ 展开 / ▸ 折叠） |
+| `group-items-{group_id}` | `html.Div` | 子页面列表容器 |
+| `sidebar-item-{tab_value}` | `html.Div` | 子页面按钮（点击切换内容） |
+
+### 6.8.3 顶层容器
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| — | `html.Div` | 整个页面的根容器（`app.layout`） |
+
+### 6.8.4 Header（顶部栏）
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| — | `html.Div` | Header 容器（flex 布局，标题 + Exit 按钮） |
+| — | `html.Span` | 标题文字 "COVID-19 Data Explorer \| Extended Edition" |
+| `exit-btn` | `html.Button` | Exit 按钮（点击关闭浏览器标签页） |
+
+### 6.8.5 全局控制栏（Global Controls）
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| — | `html.Div` | 控制栏容器（flex 布局，3 个下拉框） |
+| `global-metric` | `dcc.Dropdown` | 指标选择（12 个指标） |
+| `global-country` | `dcc.Dropdown` | 国家选择（262 个国家） |
+| `global-compare` | `dcc.Dropdown` | 对比国家选择（多选，最多 6 国） |
+
+### 6.8.6 标签页内容区
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| `tab-content` | `html.Div` | 内容容器，根据侧栏选中项动态渲染 |
+
+### 6.8.7 各标签页内部组件
+
+#### Data Pipeline
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| — | `html.Div` | Step 1 数据加载（4 个信息卡片） |
+| — | `html.Div` | Step 2 数据清洗（清洗操作 + 结果对比） |
+| — | `dash_table.DataTable` | Step 3 列概览表格（列名/类型/非空/空值/示例值） |
+
+#### Overview
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| — | 4 个 `stat_card` | 统计卡片（国家数/日期范围/总行数/全球总计） |
+| `overview-key-metrics` | `html.Div` | 关键指标（总病例/总死亡/疫苗接种数/接种率） |
+| `overview-country-filter` | `dcc.Dropdown` | 国家筛选下拉框（ALL + 各国） |
+| `overview-date-range` | `dcc.DatePickerRange` | 日期范围选择器 |
+| `data-table` | `dash_table.DataTable` | 数据表格（7 列，分页显示） |
+
+#### Global Trends
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| `global-map` | `dcc.Graph` | 世界地图（Choropleth） |
+| `global-stats` | `html.Div` | 全球统计面板（4 个 stat_card） |
+| `global-date-label` | `html.Span` | 当前日期标签 |
+| `global-slider` | `dcc.Slider` | 时间轴滑块（月采样） |
+| `global-play` | `html.Button` | ▶ Play 播放按钮 |
+| `global-trend-chart` | `dcc.Graph` | 趋势折线图 |
+| `play-interval` | `dcc.Interval` | 播放定时器（400ms 间隔） |
+
+#### Country Comparison
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| — | `dcc.Graph` | 多国对比折线图（无 ID，直接传 figure） |
+
+#### Country Deep Dive
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| — | `dcc.Graph` | 双轴图（指标 vs 疫苗接种率） |
+| — | `dcc.Graph` | 增长率分析图 |
+
+#### Rankings
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| — | `dcc.Graph` | 前 20 名水平柱状图 |
+
+#### Correlation
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| — | `dcc.Graph` | 散点图 |
+
+#### Continent Analysis
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| — | `dcc.Graph` | 大洲柱状图 |
+
+#### Moving Avg（高级）
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| `ma-chart` | `dcc.Graph` | 移动平均线图 |
+
+#### Anomalies（高级）
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| `anomaly-window` | `dcc.Dropdown` | 窗口选择（7/14/30 天） |
+| `anomaly-threshold` | `dcc.Dropdown` | 阈值选择（1.5σ~3.0σ） |
+| `anomaly-chart` | `dcc.Graph` | 异常检测图 |
+
+#### Fatality（高级）
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| `fatality-chart` | `dcc.Graph` | 病死率双轴图 |
+| `fatality-stats` | `html.Div` | 统计卡片（CFR/总病例/总死亡/峰值/趋势） |
+
+#### Lead-Lag（高级）
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| `lag-x` | `dcc.Dropdown` | 领先指标选择 |
+| `lag-y` | `dcc.Dropdown` | 滞后指标选择 |
+| `lag-chart` | `dcc.Graph` | 滞后相关性柱状图 |
+
+#### Clusters（高级）
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| `cluster-n` | `dcc.Dropdown` | 聚类数选择（k=3~7） |
+| `cluster-scatter` | `dcc.Graph` | 聚类散点图 |
+| `cluster-summary` | `html.Div` | 聚类摘要卡片 |
+
+### 6.8.8 Footer（底部）
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| — | `html.Hr` | 分隔线 |
+| — | `html.Div` | 版权文字 "Data: Our World in Data \| Extended Analysis" |
+
+### 6.8.9 组件统计汇总
+
+| 类别 | 数量 |
+|------|:----:|
+| **有 ID 的组件** | **28 个**（可通过回调直接引用） |
+| **无 ID 的组件** | 约 15 个（静态布局元素） |
+| **dcc.Graph（图表）** | 12 个 |
+| **dcc.Dropdown（下拉框）** | 9 个 |
+| **dash_table.DataTable（表格）** | 2 个 |
+| **dcc.Slider（滑块）** | 1 个 |
+| **dcc.Interval（定时器）** | 1 个 |
+| **html.Button（按钮）** | 2 个（Exit + Play） |
+| **dcc.DatePickerRange（日期选择）** | 1 个 |
