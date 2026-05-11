@@ -16,7 +16,7 @@ from src.data_loader import (
 )
 from src.data_cleaner import (
     clean_data, handle_missing_values, filter_by_date,
-    filter_by_country
+    filter_by_country, CovidDataPreprocessor
 )
 from src.data_analysis import (
     global_trend, country_trend, compare_countries,
@@ -44,8 +44,14 @@ if os.path.exists(CACHE_PATH):
     with open(CACHE_PATH, 'rb') as f:
         df_raw, df = pickle.load(f)
 else:
-    df_raw = load_data(DATA_PATH)
-    df = clean_data(df_raw)
+    # Use the team member's CovidDataPreprocessor for cleaning
+    print("Running full preprocessing pipeline...")
+    processor = CovidDataPreprocessor(DATA_PATH)
+    df_raw = processor.load_data()
+    processor.clean_data()
+    # Keep ALL columns (pass variables=None)
+    df = processor.prepare_for_analysis(variables=None)
+    # Apply missing value handling (ffill within each country)
     df = handle_missing_values(df, strategy='ffill')
     with open(CACHE_PATH, 'wb') as f:
         pickle.dump((df_raw, df), f)
@@ -90,6 +96,21 @@ DEFAULT_COUNTRIES = ['United States', 'United Kingdom', 'India', 'Brazil', 'Germ
 
 print(f"Data loaded: {len(df):,} rows, {len(countries)} countries")
 print(f"Date range: {date_min.date()} to {date_max.date()}")
+
+# Pre-compute pipeline tab data (avoids recomputation on every tab switch)
+from src.data_cleaner import get_cleaning_summary
+PIPELINE_SUMMARY = get_cleaning_summary(df_raw, df)
+PIPELINE_COLS_INFO = []
+for col in df.columns:
+    sample = df[col].dropna().iloc[:3].tolist()
+    PIPELINE_COLS_INFO.append({
+        'name': col,
+        'dtype': str(df[col].dtype),
+        'non_null': int(df[col].notna().sum()),
+        'null_count': int(df[col].isna().sum()),
+        'sample_values': sample
+    })
+print(f"Pipeline data pre-computed: {len(PIPELINE_COLS_INFO)} columns")
 
 # ============================================================================
 # App Initialization
@@ -237,21 +258,9 @@ def render_tab(tab, metric, country, compare_list):
 
 def build_pipeline_tab():
     """Data Pipeline tab: shows data loading and cleaning steps."""
-    # Compute cleaning summary
-    from src.data_cleaner import get_cleaning_summary
-    summary = get_cleaning_summary(df_raw, df)
-    
-    # Column info (fast: use first few rows instead of full unique scan)
-    cols_info = []
-    for col in df.columns:
-        sample = df[col].dropna().iloc[:3].tolist()
-        cols_info.append({
-            'name': col,
-            'dtype': str(df[col].dtype),
-            'non_null': int(df[col].notna().sum()),
-            'null_count': int(df[col].isna().sum()),
-            'sample_values': sample
-        })
+    # Use pre-computed data (computed once at startup)
+    summary = PIPELINE_SUMMARY
+    cols_info = PIPELINE_COLS_INFO
     
     return html.Div([
         # Step 1: Data Loading
