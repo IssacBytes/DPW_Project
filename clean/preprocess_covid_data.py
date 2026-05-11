@@ -437,7 +437,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Preprocess a COVID-19 dataset with pandas.")
     parser.add_argument(
         "--input",
-        default="/Users/baozhashizitou/Documents/必修/DPW/project/compact.csv",
+        default="compact.csv",
         help="Path to the raw input CSV file.",
     )
     parser.add_argument(
