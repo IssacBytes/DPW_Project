@@ -1,0 +1,263 @@
+:root {
+  --ease-smooth: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-fast: 140ms;
+  --motion-page: 180ms;
+  --motion-card: 220ms;
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes plot-line-draw {
+  from {
+    stroke-dashoffset: 2400;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes plot-dash-line-draw {
+  from {
+    opacity: 0;
+    stroke-dashoffset: 1200;
+  }
+  to {
+    opacity: 1;
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes plot-line-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes plot-marker-pop {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes plot-bar-enter {
+  from {
+    opacity: 0;
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes plot-map-fill {
+  from {
+    opacity: 0;
+    filter: saturate(0.75);
+  }
+  to {
+    opacity: 1;
+    filter: saturate(1);
+  }
+}
+
+.page-shell {
+  will-change: opacity, transform;
+}
+
+.page-enter {
+  animation: page-enter var(--motion-page) var(--ease-smooth) both;
+}
+
+.animate-card {
+  animation: card-enter var(--motion-card) var(--ease-smooth) both;
+  transition:
+    transform var(--motion-fast) var(--ease-smooth),
+    box-shadow var(--motion-fast) var(--ease-smooth),
+    border-color var(--motion-fast) var(--ease-smooth);
+}
+
+.page-shell > .animate-card:nth-child(1),
+.page-shell > div:nth-child(1) .animate-card {
+  animation-delay: 20ms;
+}
+
+.page-shell > .animate-card:nth-child(2),
+.page-shell > div:nth-child(2) .animate-card {
+  animation-delay: 45ms;
+}
+
+.page-shell > .animate-card:nth-child(3),
+.page-shell > div:nth-child(3) .animate-card {
+  animation-delay: 70ms;
+}
+
+.dashboard-card:hover,
+.stat-card:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 8px 20px rgba(15, 23, 42, 0.06),
+    0 2px 6px rgba(15, 23, 42, 0.04) !important;
+}
+
+.sidebar-nav-item,
+.sidebar-item-collapsed,
+.sidebar-group-header,
+.sidebar-toggle-control {
+  transition:
+    background-color var(--motion-fast) var(--ease-smooth),
+    color var(--motion-fast) var(--ease-smooth),
+    border-color var(--motion-fast) var(--ease-smooth),
+    transform var(--motion-fast) var(--ease-smooth);
+}
+
+.sidebar-nav-item:hover,
+.sidebar-group-header:hover {
+  transform: translateX(2px);
+  background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+.sidebar-item-collapsed:hover,
+.sidebar-toggle-control:hover {
+  transform: translateY(-1px);
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+.ui-button {
+  transition:
+    transform var(--motion-fast) var(--ease-smooth),
+    box-shadow var(--motion-fast) var(--ease-smooth),
+    border-color var(--motion-fast) var(--ease-smooth),
+    color var(--motion-fast) var(--ease-smooth);
+}
+
+.ui-button:hover {
+  transform: translateY(-1px);
+  border-color: #9ca3af !important;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+}
+
+.ui-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
+}
+
+.dash-graph .main-svg .cartesianlayer .scatterlayer .trace .js-line:not([style*="stroke-dasharray"]):not([stroke-dasharray]) {
+  animation: plot-line-fade 520ms var(--ease-smooth) 90ms both;
+}
+
+#ma-main-chart .main-svg .cartesianlayer .scatterlayer .trace:first-child .js-line {
+  animation: plot-line-fade 520ms var(--ease-smooth) 90ms both !important;
+}
+
+.dash-graph .main-svg .cartesianlayer .scatterlayer .trace .js-line[style*="stroke-dasharray"],
+.dash-graph .main-svg .cartesianlayer .scatterlayer .trace .js-line[stroke-dasharray] {
+  animation: plot-line-fade 520ms var(--ease-smooth) 90ms both !important;
+}
+
+.dash-graph .main-svg .cartesianlayer .scatterlayer .trace:nth-child(2) .js-line:not([style*="stroke-dasharray"]):not([stroke-dasharray]) {
+  animation-delay: 120ms;
+}
+
+.dash-graph .main-svg .cartesianlayer .scatterlayer .trace:nth-child(3) .js-line:not([style*="stroke-dasharray"]):not([stroke-dasharray]) {
+  animation-delay: 150ms;
+}
+
+.dash-graph .main-svg .cartesianlayer .scatterlayer .trace:nth-child(n+4) .js-line:not([style*="stroke-dasharray"]):not([stroke-dasharray]) {
+  animation-delay: 180ms;
+}
+
+.dash-graph .main-svg .cartesianlayer .scatterlayer .trace .points path,
+.dash-graph .main-svg .cartesianlayer .scatterlayer .trace .points circle {
+  animation: plot-marker-pop 520ms var(--ease-smooth) 160ms both;
+}
+
+.dash-graph .main-svg .cartesianlayer .scatterlayer .trace:nth-child(2) .points path,
+.dash-graph .main-svg .cartesianlayer .scatterlayer .trace:nth-child(2) .points circle {
+  animation-delay: 220ms;
+}
+
+.dash-graph .main-svg .cartesianlayer .scatterlayer .trace:nth-child(n+3) .points path,
+.dash-graph .main-svg .cartesianlayer .scatterlayer .trace:nth-child(n+3) .points circle {
+  animation-delay: 280ms;
+}
+
+.dash-graph .main-svg .cartesianlayer .barlayer .trace .point path {
+  animation: plot-bar-enter 720ms var(--ease-smooth) 120ms both;
+}
+
+.dash-graph .main-svg .cartesianlayer .barlayer .trace:nth-child(2) .point path {
+  animation-delay: 180ms;
+}
+
+.dash-graph .main-svg .cartesianlayer .barlayer .trace:nth-child(n+3) .point path {
+  animation-delay: 240ms;
+}
+
+.dash-graph .main-svg .geolayer .choroplethlayer path,
+.dash-graph .main-svg .geolayer .layer path {
+  animation: plot-map-fill 760ms var(--ease-smooth) 140ms both;
+}
+
+.dash-graph .main-svg .pielayer .trace path,
+.dash-graph .main-svg .sunburstlayer .trace path,
+.dash-graph .main-svg .treemaplayer .trace path {
+  animation: plot-marker-pop 620ms var(--ease-smooth) 140ms both;
+}
+
+.Select-control,
+.DateRangePickerInput,
+.DateInput_input {
+  transition:
+    border-color var(--motion-fast) var(--ease-smooth),
+    box-shadow var(--motion-fast) var(--ease-smooth),
+    background-color var(--motion-fast) var(--ease-smooth);
+}
+
+.Select-control:hover,
+.DateRangePickerInput:hover {
+  border-color: #93a4c8 !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);
+}
+
+.is-focused > .Select-control {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+}

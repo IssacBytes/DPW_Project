@@ -178,7 +178,9 @@ def card(children=None, style_extra=None, **kwargs):
     base_style = dict(CARD_STYLE)
     if style_extra:
         base_style.update(style_extra)
-    return html.Div(children, style=base_style, **kwargs)
+    existing_class = kwargs.pop('className', '')
+    class_name = f'dashboard-card animate-card {existing_class}'.strip()
+    return html.Div(children, style=base_style, className=class_name, **kwargs)
 
 
 def stat_card(label, value, subtitle=''):
@@ -195,7 +197,7 @@ def stat_card(label, value, subtitle=''):
             'textOverflow': 'ellipsis',
         }),
         html.Div(subtitle, style=TYPOGRAPHY['kpi_subtitle']) if subtitle else None
-    ], style={
+    ], className='stat-card animate-card', style={
         'flex': '1 1 190px', 'minWidth': '190px',
         'background': '#ffffff', 'padding': '20px 24px',
         'borderRadius': '12px', 'border': 'none',
@@ -418,13 +420,14 @@ def group_items_style(expanded=False):
 # Build sidebar inline
 _collapsed_children = [
     html.Div('>', id='sidebar-toggle-collapsed', n_clicks=0,
-             style=collapsed_toggle_style(), title='Expand sidebar')
+             style=collapsed_toggle_style(), className='sidebar-toggle-control', title='Expand sidebar')
 ] + [
     html.Div(
         _item['short'],
         id=f'collapsed-item-{_item["nav_id"]}',
         n_clicks=0,
         style=collapsed_item_style(_item['nav_id'] == DEFAULT_NAV),
+        className='sidebar-item-collapsed',
         title=_item['label']
     )
     for _item in ALL_TAB_ITEMS
@@ -442,7 +445,8 @@ for _gi, _group in enumerate(SIDEBAR_GROUPS):
             ],
             id=f'group-header-{_group["group_id"]}',
             n_clicks=0,
-            style=group_header_style()
+            style=group_header_style(),
+            className='sidebar-group-header'
         )
     )
     _item_divs = []
@@ -452,7 +456,8 @@ for _gi, _group in enumerate(SIDEBAR_GROUPS):
                 _item['label'],
                 id=f'sidebar-item-{_item["nav_id"]}',
                 n_clicks=0,
-                style=sidebar_item_style(_item['nav_id'] == DEFAULT_NAV)
+                style=sidebar_item_style(_item['nav_id'] == DEFAULT_NAV),
+                className='sidebar-nav-item'
             )
         )
     _expanded_children.append(
@@ -471,6 +476,7 @@ _sidebar = html.Div([
                 style={'textAlign': 'center', 'padding': '10px', 'cursor': 'pointer',
                        'fontSize': '12px', 'color': SIDEBAR_TEXT_MUTED,
                        'borderTop': '1px solid #2a2a3e', 'marginTop': 'auto'},
+                className='sidebar-toggle-control',
                 title='Collapse sidebar')
     ], id='sidebar-expanded',
        style={'display': 'flex', 'flexDirection': 'column', 'height': '100%'})
@@ -496,7 +502,8 @@ app.layout = html.Div([
                            style={'padding': '8px 22px', 'background': '#fff',
                                   'border': '1px solid #d1d5db', 'borderRadius': '8px',
                                   'cursor': 'pointer', 'fontSize': '14px', 'color': '#6b7280',
-                                  'fontFamily': FONT_FAMILY})
+                                  'fontFamily': FONT_FAMILY},
+                           className='ui-button')
             ], style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center',
                       'padding': '22px 40px', 'borderBottom': '1px solid #e5e7eb', 'background': '#fff'}),
 
@@ -526,7 +533,7 @@ app.layout = html.Div([
             }),
 
             # ── Tab Content ──
-            html.Div(id='tab-content', style={
+            html.Div(id='tab-content', className='tab-content-frame', style={
                 'padding': CONTENT_PADDING, 'background': BG_COLOR,
                 'minHeight': 'calc(100vh - 140px)'
             }),
@@ -676,7 +683,11 @@ def render_active_tab(sidebar_state, metric, country, compare_list):
     tab = (sidebar_state or {}).get('active_tab', DEFAULT_TAB)
     if tab not in ALL_TAB_VALUES:
         tab = DEFAULT_TAB
-    return render_tab_content(tab, metric, country, compare_list)
+    return html.Div(
+        render_tab_content(tab, metric, country, compare_list),
+        className='page-shell page-enter',
+        key=f'{tab}-{metric}-{country}'
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -878,7 +889,7 @@ def build_global(metric, compare_list):
             html.Div([
                 html.Span(id='global-date-label', children=f'Date: {MONTHLY_DATES[-1]}', style={'fontSize': '13px', 'fontWeight': '600', 'color': '#333', 'fontFamily': FONT_FAMILY, 'minWidth': '150px'}),
                 html.Div([dcc.Slider(id='global-slider', min=0, max=len(MONTHLY_DATES)-1, value=len(MONTHLY_DATES)-1, marks={i: MONTHLY_DATES[i][:7] for i in range(0, len(MONTHLY_DATES), max(1, len(MONTHLY_DATES)//6))}, step=1, updatemode='drag')], style={'flex': '1', 'margin': '0 16px'}),
-                html.Button('▶ Play', id='global-play', n_clicks=0, style={'padding': '4px 16px', 'background': '#fff', 'border': '1px solid #ddd', 'borderRadius': '8px', 'cursor': 'pointer', 'fontSize': '12px', 'fontFamily': FONT_FAMILY}),
+                html.Button('▶ Play', id='global-play', n_clicks=0, className='ui-button', style={'padding': '4px 16px', 'background': '#fff', 'border': '1px solid #ddd', 'borderRadius': '8px', 'cursor': 'pointer', 'fontSize': '12px', 'fontFamily': FONT_FAMILY}),
             ], style={'display': 'flex', 'alignItems': 'center'})
         ], style_extra={'marginBottom': '16px'}),
 
