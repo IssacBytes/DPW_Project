@@ -132,6 +132,8 @@ def plot_dual_axis(df, country, metric_left, metric_right) -> go.Figure:
 **交互**：
 - `hovermode='x unified'` — 统一显示两个指标
 
+**用途**：在 Time Series 标签页中展示。
+
 ### 5.3.5 增长率图：`plot_growth_rate()`
 
 ```python
@@ -147,6 +149,8 @@ def plot_growth_rate(df, country, metric) -> go.Figure:
 - **下方面板**：每日增长率柱状图
 
 **内部调用**：`data_analysis.growth_rate_analysis()` 计算增长率数据
+
+**用途**：在 Growth Rate 标签页中展示。
 
 ### 5.3.6 散点图：`plot_scatter()`
 
@@ -185,6 +189,8 @@ def plot_sparkline(series, height=30, width=120) -> go.Figure:
 
 ## 5.4 图表与标签页对应关系
 
+### 基础版 (app.py)
+
 | 标签页 | 图表函数 | 图表类型 |
 |--------|----------|----------|
 | Global Trends | `plot_choropleth_map()` | 世界地图 |
@@ -195,6 +201,24 @@ def plot_sparkline(series, height=30, width=120) -> go.Figure:
 | Rankings | `plot_bar_chart()` | 排名柱状图 |
 | Correlation | `plot_scatter()` | 散点图 |
 | Continent Analysis | `plot_bar_chart()` | 大洲柱状图 |
+
+### 扩展版 (app_extended.py)
+
+| 标签页 | 图表函数 | 图表类型 |
+|--------|----------|----------|
+| Global Trends | `plot_choropleth_map()` | 世界地图 |
+| Global Trends | `plot_trend_line()` | 趋势折线图 |
+| Country Comparison | `plot_trend_line()` | 多线折线图 |
+| Time Series | `plot_dual_axis()` | 双轴图 |
+| Growth Rate | `plot_growth_rate()` | 增长率图 |
+| Rankings | `plot_bar_chart()` | 排名柱状图 |
+| Correlation | `plot_scatter()` | 散点图 |
+| Continent Comparison | `plot_bar_chart()` | 大洲柱状图 |
+| Moving Average | 内联构建（`make_moving_average_outputs`） | 多线折线图 + 柱状图 |
+| Anomaly Detection | 内联构建（`make_anomaly_figure`） | 折线图 + 散点标记 |
+| Fatality Trend | 内联构建（`make_fatality_outputs`） | 双面板图 |
+| Lead-Lag Analysis | 内联构建（`make_lag_figure`） | 柱状图 |
+| Clustering | 内联构建（`make_cluster_outputs`） | 散点图 |
 
 ## 5.5 图表配置
 

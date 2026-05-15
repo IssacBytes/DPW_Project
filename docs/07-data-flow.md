@@ -57,26 +57,37 @@ compact.csv (原始数据，570,606 行，67 列)
                    │
                    ▼
 ┌─────────────────────────────────────────────┐
-│  Step 6: 启动 Dash 应用                      │
-│  app.run(host='127.0.0.1', port=8050)        │
+│  Step 6: 预计算（扩展版特有）                │
 │  ─────────────────────────────────           │
-│  • 用户打开 http://127.0.0.1:8050            │
-│  • 看到 8 个标签页的 GUI                     │
+│  • PIPELINE_SUMMARY → 清洗统计               │
+│  • PIPELINE_COLS_INFO → 列元数据             │
+│  • CLUSTER_BASE_DF → 聚类基础数据            │
+│  • CLUSTER_CACHE → 预计算 k=3~7 聚类结果     │
 └──────────────────┬──────────────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────────────┐
-│  Step 7: 用户交互 → 回调触发                 │
+│  Step 7: 启动 Dash 应用                      │
+│  app.run(host='127.0.0.1', port=8051)        │
 │  ─────────────────────────────────           │
+│  • 用户打开 http://127.0.0.1:8051            │
+│  • 看到 14 个标签页的 GUI（扩展版）          │
+└──────────────────┬──────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────┐
+│  Step 8: 用户交互 → 回调触发                 │
+│  ─────────────────────────────────           │
+│  • 点击侧栏导航 → sidebar-state 更新         │
 │  • 选择指标 → global-metric 更新             │
 │  • 选择国家 → global-country 更新            │
-│  • 切换标签页 → main-tabs 更新               │
 │  • 拖动滑块 → global-slider 更新             │
+│  • 切换分组 → group-states 更新              │
 └──────────────────┬──────────────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────────────┐
-│  Step 8: 数据分析                            │
+│  Step 9: 数据分析                            │
 │  ─────────────────────────────────           │
 │  • descriptive_stats() → 统计卡片            │
 │  • country_trend() → 国家趋势数据            │
@@ -84,11 +95,16 @@ compact.csv (原始数据，570,606 行，67 列)
 │  • top_countries() → 排名数据                │
 │  • growth_rate_analysis() → 增长率数据       │
 │  • continent_comparison() → 大洲汇总         │
+│  • moving_average() → 移动平均               │
+│  • anomaly_detection() → 异常检测            │
+│  • fatality_trend() → 病死率                 │
+│  • cross_lag_correlation() → 滞后分析        │
+│  • simple_clustering() → 聚类                │
 └──────────────────┬──────────────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────────────┐
-│  Step 9: 可视化生成                          │
+│  Step 10: 可视化生成                         │
 │  ─────────────────────────────────           │
 │  • plot_choropleth_map() → 世界地图          │
 │  • plot_trend_line() → 趋势折线图            │
@@ -96,11 +112,16 @@ compact.csv (原始数据，570,606 行，67 列)
 │  • plot_dual_axis() → 双轴图                 │
 │  • plot_growth_rate() → 增长率图             │
 │  • plot_scatter() → 散点图                   │
+│  • make_moving_average_outputs() → MA 图     │
+│  • make_anomaly_figure() → 异常图            │
+│  • make_fatality_outputs() → 病死率图        │
+│  • make_lag_figure() → 滞后图                │
+│  • make_cluster_outputs() → 聚类图           │
 └──────────────────┬──────────────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────────────┐
-│  Step 10: GUI 展示                           │
+│  Step 11: GUI 展示                           │
 │  ─────────────────────────────────           │
 │  • Dash 将 Plotly Figure 渲染为 HTML         │
 │  • 用户看到交互式图表                        │
@@ -116,19 +137,20 @@ compact.csv (原始数据，570,606 行，67 列)
 用户操作：
 1. 选择指标 "Daily New Cases"
 2. 选择国家 "United States"
-3. 切换到 "Global Trends" 标签页
+3. 点击侧栏 "Global Trends"
 4. 拖动时间轴滑块到 2022-01
 
 函数调用链：
 ─────────────────────────────────────────────
 global-metric = 'new_cases_smoothed'
 global-country = 'United States'
-main-tabs = 'tab-global'
+sidebar-state = {active_tab: 'tab-global'}
 global-slider = 42 (对应 2022-01-15)
     │
     ▼
-render_tab('tab-global', 'new_cases_smoothed', 'United States', [...])
-    → build_global_tab('new_cases_smoothed')
+render_active_tab(sidebar_state, metric, country, compare_list)
+    → render_tab_content('tab-global', 'new_cases_smoothed', 'United States', [...])
+    → build_global('new_cases_smoothed', [...])
     │
     ▼
 update_global_map('new_cases_smoothed', 42)
@@ -154,20 +176,21 @@ update_global_stats('new_cases_smoothed', 42)
 1. 选择指标 "Fully Vaccinated (%)"
 2. 选择国家 "United States"
 3. 对比选择 "United Kingdom", "Germany", "Japan"
-4. 切换到 "Country Comparison" 标签页
+4. 点击侧栏 "Country Comparison"
 
 函数调用链：
 ─────────────────────────────────────────────
 global-metric = 'people_fully_vaccinated_per_hundred'
 global-country = 'United States'
 global-compare = ['United Kingdom', 'Germany', 'Japan']
-main-tabs = 'tab-compare'
+sidebar-state = {active_tab: 'tab-compare'}
     │
     ▼
-render_tab('tab-compare', 'people_fully_vaccinated_per_hundred', 
-           'United States', ['United Kingdom', 'Germany', 'Japan'])
-    → build_compare_tab('people_fully_vaccinated_per_hundred', 
-                        'United States', ['United Kingdom', 'Germany', 'Japan'])
+render_active_tab(sidebar_state, metric, country, compare_list)
+    → render_tab_content('tab-compare', 'people_fully_vaccinated_per_hundred',
+                         'United States', ['United Kingdom', 'Germany', 'Japan'])
+    → build_compare('people_fully_vaccinated_per_hundred',
+                    'United States', ['United Kingdom', 'Germany', 'Japan'])
     │
     ▼
 plot_trend_line(df, ['United States', 'United Kingdom', 'Germany', 'Japan'],
@@ -176,26 +199,50 @@ plot_trend_line(df, ['United States', 'United Kingdom', 'Germany', 'Japan'],
     → 返回 4 条折线的对比图
 ```
 
-### 示例 3：查看美国疫情峰值
+### 示例 3：查看美国时间序列
 
 ```
 用户操作：
 1. 选择指标 "Daily New Cases"
 2. 选择国家 "United States"
-3. 切换到 "Country Deep Dive" 标签页
+3. 点击侧栏 "Time Series"
 
 函数调用链：
 ─────────────────────────────────────────────
-main-tabs = 'tab-deepdive'
+sidebar-state = {active_tab: 'tab-timeseries'}
     │
     ▼
-render_tab('tab-deepdive', 'new_cases_smoothed', 'United States', [...])
-    → build_deepdive_tab('new_cases_smoothed', 'United States')
+render_active_tab(sidebar_state, metric, country, compare_list)
+    → render_tab_content('tab-timeseries', 'new_cases_smoothed', 'United States', [...])
+    → build_timeseries('new_cases_smoothed', 'United States')
     │
     ▼
-plot_dual_axis(df, 'United States', 'new_cases_smoothed', 
+make_deepdive_stats('United States', 'new_cases_smoothed', 'Daily New Cases')
+    → growth_rate_analysis(df, 'United States', 'new_cases_smoothed')
+    → 返回 6 个统计卡片
+    │
+    ▼
+plot_dual_axis(df, 'United States', 'new_cases_smoothed',
                'people_fully_vaccinated_per_hundred')
     → 双轴图：左轴新增病例，右轴疫苗接种率
+```
+
+### 示例 4：查看美国增长率
+
+```
+用户操作：
+1. 选择指标 "Daily New Cases"
+2. 选择国家 "United States"
+3. 点击侧栏 "Growth Rate"
+
+函数调用链：
+─────────────────────────────────────────────
+sidebar-state = {active_tab: 'tab-growthrate'}
+    │
+    ▼
+render_active_tab(sidebar_state, metric, country, compare_list)
+    → render_tab_content('tab-growthrate', 'new_cases_smoothed', 'United States', [...])
+    → build_growth_rate_page('new_cases_smoothed', 'United States')
     │
     ▼
 plot_growth_rate(df, 'United States', 'new_cases_smoothed')
@@ -204,16 +251,44 @@ plot_growth_rate(df, 'United States', 'new_cases_smoothed')
     → 下方面板：每日增长率柱状
 ```
 
+### 示例 5：移动平均分析
+
+```
+用户操作：
+1. 选择指标 "Daily New Cases"
+2. 选择国家 "United States"
+3. 点击侧栏 "Moving Average"
+4. 选择时间段 "2022 Omicron Wave"
+5. 勾选 "Show Raw"
+
+函数调用链：
+─────────────────────────────────────────────
+sidebar-state = {active_tab: 'tab-ma'}
+ma-range = '2022_omicron'
+ma-show-raw = ['raw']
+    │
+    ▼
+update_moving_average('new_cases_smoothed', 'United States', '2022_omicron', ['raw'])
+    → make_moving_average_outputs('United States', 'new_cases_smoothed',
+                                  view_range='2022_omicron', show_raw=True)
+    → moving_average_base_series('United States', 'new_cases_smoothed')
+    → ma_range_bounds(ma_df, '2022_omicron') → (2022-01-01, 2022-12-31)
+    → filter_ma_range(ma_df, '2022_omicron')
+    → 生成 3 个图表 + 6 个统计卡片
+```
+
 ## 7.3 模块间依赖关系
 
 ```
-app.py
+app_extended.py
   ├── 依赖 src/data_loader.py
   │     └── 依赖 pandas, numpy
   ├── 依赖 src/data_cleaner.py
   │     └── 依赖 pandas, numpy
   ├── 依赖 src/data_analysis.py
   │     └── 依赖 pandas, numpy
+  ├── 依赖 src/advanced_analysis.py
+  │     └── 依赖 pandas, numpy, sklearn
   └── 依赖 src/visualization.py
         ├── 依赖 plotly.express, plotly.graph_objects
         └── 依赖 src/data_analysis (growth_rate_analysis)
@@ -223,7 +298,9 @@ app.py
 
 | 位置 | 优化 | 效果 |
 |------|------|------|
-| `app.py` 启动 | Pickle 缓存 | 二次启动 0.5 秒 |
+| `app_extended.py` 启动 | Pickle 缓存 | 二次启动 0.5 秒 |
 | `update_global_trend()` | `np.searchsorted` 二分查找 | 57 万行数据毫秒级过滤 |
 | `global-slider` | 每月采样（`all_dates[::30]`） | 滑块从 2000+ 步减少到 ~70 步 |
+| `PIPELINE_SUMMARY` | 启动时预计算 | 避免每次切换标签页重新计算 |
+| `CLUSTER_CACHE` | 缓存 k=3~7 聚类结果 | 聚类标签页秒级切换 |
 | `app.run(debug=False)` | 关闭 debug 模式 | 避免双重重载 |

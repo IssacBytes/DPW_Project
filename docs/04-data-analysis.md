@@ -1,10 +1,10 @@
 # 4. 数据分析模块
 
-**对应源文件**：`src/data_analysis.py`
+**对应源文件**：`src/data_analysis.py`、`src/advanced_analysis.py`
 
 ## 4.1 模块职责
 
-对清洗后的数据进行统计分析、趋势分析、对比分析、相关性分析等，提供函数接口供 GUI 调用。
+对清洗后的数据进行统计分析、趋势分析、对比分析、相关性分析等，提供函数接口供 GUI 调用。扩展版新增高级分析模块，提供移动平均、异常检测、病死率分析、滞后相关性分析和聚类分析。
 
 ## 4.2 描述统计：`descriptive_stats()`
 
@@ -110,7 +110,7 @@ def growth_rate_analysis(df: pd.DataFrame, country: str, metric: str = 'new_case
 
 **返回值**：`[date, metric, growth_rate, daily_change]` 的 DataFrame
 
-**用途**：在 Country Deep Dive 标签页中生成增长率分析图。
+**用途**：在 Growth Rate 标签页中生成增长率分析图。
 
 ## 4.6 累计分析：`cumulative_analysis()`
 
@@ -184,7 +184,123 @@ peaks = get_peak_dates(df, 'United States', 'new_cases_smoothed', n_peaks=3)
 # 返回: [('2022-01-15', 802432.0), ('2022-01-14', 786321.0), ('2022-01-16', 771245.0)]
 ```
 
-## 4.11 函数调用关系图
+## 4.11 高级分析模块 (`advanced_analysis.py`)
+
+扩展版新增的高级分析函数，位于 `src/advanced_analysis.py`。
+
+### 移动平均：`moving_average()`
+
+```python
+def moving_average(df: pd.DataFrame, country: str, metric: str, windows: list = [7, 14, 30]) -> pd.DataFrame:
+```
+
+**功能**：计算指定指标的多个移动平均窗口。
+
+**参数**：
+- `windows`：移动平均窗口列表（默认 7、14、30 天）
+
+**返回值**：`[date, metric, ma_7d, ma_14d, ma_30d, ma_diff_7_30]` 的 DataFrame
+
+**用途**：在 Moving Average 标签页中生成趋势平滑图。
+
+### 异常检测：`anomaly_detection()`
+
+```python
+def anomaly_detection(df: pd.DataFrame, country: str, metric: str, threshold: float = 2.0, window: int = 14) -> pd.DataFrame:
+```
+
+**功能**：使用滚动窗口标准差方法检测异常值。
+
+**算法**：
+- 计算滚动窗口内的均值和标准差
+- 标记超出 `mean ± threshold * std` 的数据点为异常
+
+**参数**：
+- `threshold`：标准差倍数阈值（默认 2.0）
+- `window`：滚动窗口大小（默认 14 天）
+
+**返回值**：`[date, metric, upper_bound, lower_bound, is_anomaly]` 的 DataFrame
+
+**用途**：在 Anomaly Detection 标签页中标识异常数据点。
+
+### 病死率分析：`fatality_trend()`
+
+```python
+def fatality_trend(df: pd.DataFrame, country: str) -> pd.DataFrame:
+```
+
+**功能**：计算病例致死率（CFR）及其滚动平均。
+
+**计算**：
+- `cfr = total_deaths / total_cases * 100`
+- `cfr_14d_ma = cfr.rolling(14).mean()`
+
+**返回值**：`[date, total_cases, total_deaths, cfr, cfr_14d_ma]` 的 DataFrame
+
+**用途**：在 Fatality Trend 标签页中生成病死率趋势图。
+
+### 滞后相关性：`cross_lag_correlation()`
+
+```python
+def cross_lag_correlation(df: pd.DataFrame, country: str, x_metric: str, y_metric: str, max_lag: int = 60) -> pd.DataFrame:
+```
+
+**功能**：计算两个时间序列在不同滞后天数下的相关性。
+
+**算法**：
+- 将 x 序列向前/向后平移 `lag` 天
+- 计算平移后与 y 序列的 Pearson 相关系数
+- 正 lag 表示 x 领先于 y
+
+**参数**：
+- `max_lag`：最大滞后天数（默认 60）
+
+**返回值**：`[lag_days, correlation]` 的 DataFrame
+
+**用途**：在 Lead-Lag Analysis 标签页中探索指标间的时序关系。
+
+### 聚类分析：`simple_clustering()`
+
+```python
+def simple_clustering(df: pd.DataFrame, features: list, n_clusters: int = 4) -> pd.DataFrame:
+```
+
+**功能**：使用 K-Means 对各国进行聚类。
+
+**处理**：
+- 取每个国家的最新记录
+- 使用 StandardScaler 标准化特征
+- 执行 K-Means 聚类
+
+**参数**：
+- `features`：聚类特征列名列表
+- `n_clusters`：聚类数（默认 4）
+
+**返回值**：`[country, feature1, feature2, ..., cluster]` 的 DataFrame
+
+**用途**：在 Clustering 标签页中对国家进行分组。
+
+### 国家摘要报告：`country_summary_report()`
+
+```python
+def country_summary_report(df: pd.DataFrame, country: str) -> dict:
+```
+
+**功能**：生成单个国家的综合摘要报告。
+
+**返回值**：包含病例、死亡、疫苗、检测等关键指标的字典。
+
+### 多指标摘要：`multi_metric_summary()`
+
+```python
+def multi_metric_summary(df: pd.DataFrame, country: str, metrics: list) -> pd.DataFrame:
+```
+
+**功能**：提取多个指标的时间序列数据。
+
+**返回值**：`[date, metric1, metric2, ...]` 的 DataFrame
+
+## 4.12 函数调用关系图
 
 ```
 用户操作（选择指标/国家）
@@ -198,12 +314,29 @@ peaks = get_peak_dates(df, 'United States', 'new_cases_smoothed', n_peaks=3)
     ├── 国家对比标签页
     │   └── compare_countries(df, countries, metric) → 对比数据
     │
-    ├── 深度分析标签页
-    │   ├── growth_rate_analysis(df, country, metric) → 增长率
+    ├── 时间序列标签页
     │   └── vaccination_impact(df, country) → 疫苗影响
+    │
+    ├── 增长率标签页
+    │   └── growth_rate_analysis(df, country, metric) → 增长率
     │
     ├── 排名标签页
     │   └── top_countries(df, metric, n=20) → 前20名
     │
-    └── 大洲分析标签页
-        └── continent_comparison(df, metric) → 大洲汇总
+    ├── 大洲分析标签页
+    │   └── continent_comparison(df, metric) → 大洲汇总
+    │
+    ├── 移动平均标签页
+    │   └── moving_average(df, country, metric) → 平滑趋势
+    │
+    ├── 异常检测标签页
+    │   └── anomaly_detection(df, country, metric) → 异常点
+    │
+    ├── 病死率标签页
+    │   └── fatality_trend(df, country) → CFR 趋势
+    │
+    ├── 滞后分析标签页
+    │   └── cross_lag_correlation(df, country, x, y) → 时序关系
+    │
+    └── 聚类标签页
+        └── simple_clustering(df, features, k) → 国家分组

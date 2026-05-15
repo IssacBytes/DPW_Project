@@ -137,6 +137,8 @@ def get_basic_stats(df: pd.DataFrame) -> pd.DataFrame:
 
 ## 2.5 在 GUI 中的使用
 
+### 基础版 (app.py)
+
 在 `app.py` 中，数据加载在应用启动时执行：
 
 ```python
@@ -150,3 +152,39 @@ countries = get_countries(df)            # 国家列表 → 下拉框
 continents = get_continents(df)          # 大洲列表
 date_min, date_max = get_date_range(df)  # 日期范围
 numeric_cols = get_numeric_columns(df)   # 数值列 → 指标选择
+```
+
+### 扩展版 (app_extended.py)
+
+扩展版使用 `CovidDataPreprocessor` 类进行数据加载，并增加了 pickle 缓存机制：
+
+```python
+# app_extended.py 启动流程
+if os.path.exists(CACHE_PATH):
+    # 直接从缓存加载，跳过预处理
+    with open(CACHE_PATH, 'rb') as f:
+        df_raw, df = pickle.load(f)
+else:
+    # 首次运行：完整预处理
+    processor = CovidDataPreprocessor(DATA_PATH)
+    df_raw = processor.load_data()
+    processor.clean_data()
+    df = processor.prepare_for_analysis(variables=None)
+    df = handle_missing_values(df, strategy='ffill')
+    # 缓存到磁盘，下次秒开
+    with open(CACHE_PATH, 'wb') as f:
+        pickle.dump((df_raw, df), f)
+
+# 预计算管道统计和列信息（只计算一次）
+PIPELINE_SUMMARY = get_cleaning_summary(df_raw, df)
+PIPELINE_COLS_INFO = [...]  # 所有列的元数据
+
+# 预计算聚类基础数据（避免每次切换标签页重新计算）
+CLUSTER_FEATURES = ['total_cases_per_million', 'total_deaths_per_million',
+                    'people_fully_vaccinated_per_hundred', 'population']
+CLUSTER_BASE_DF = df.loc[df.groupby('country')['date'].idxmax()].dropna(subset=CLUSTER_FEATURES).copy()
+```
+
+**缓存优化效果**：
+- 首次启动：约 10-15 秒（加载 + 清洗 + 缓存）
+- 二次启动：约 0.5-1 秒（直接从 pickle 加载）

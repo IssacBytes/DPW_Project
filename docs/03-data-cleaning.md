@@ -25,7 +25,32 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
 **返回值**：
 - 清洗后的 DataFrame
 
-## 3.3 缺失值处理：`handle_missing_values()`
+## 3.3 CovidDataPreprocessor 类
+
+扩展版 (`app_extended.py`) 使用 `CovidDataPreprocessor` 类进行更结构化的数据预处理：
+
+```python
+class CovidDataPreprocessor:
+    def __init__(self, filepath: str):
+        self.filepath = filepath
+        self.df = None
+
+    def load_data(self) -> pd.DataFrame:
+        """加载 CSV 数据"""
+        ...
+
+    def clean_data(self):
+        """执行数据清洗（去重、排序、日期转换）"""
+        ...
+
+    def prepare_for_analysis(self, variables: list = None) -> pd.DataFrame:
+        """准备分析用的 DataFrame，可选只保留指定列"""
+        ...
+```
+
+**用途**：在扩展版中替代独立的 `clean_data()` 函数，提供更清晰的预处理流程。
+
+## 3.4 缺失值处理：`handle_missing_values()`
 
 ```python
 def handle_missing_values(df: pd.DataFrame, strategy: str = 'ffill') -> pd.DataFrame:
@@ -70,7 +95,7 @@ date       new_cases
 2020-01-04  150
 ```
 
-## 3.4 过滤函数
+## 3.5 过滤函数
 
 ### `filter_by_date()`
 
@@ -112,7 +137,7 @@ def remove_outliers(df: pd.DataFrame, column: str, method: str = 'iqr', threshol
 - `'iqr'`（默认）：四分位距法，移除超出 `Q1 - 1.5*IQR` 到 `Q3 + 1.5*IQR` 范围的值
 - `'zscore'`：Z-score 法，移除 Z-score 绝对值超过阈值的值
 
-## 3.5 清洗统计：`get_cleaning_summary()`
+## 3.6 清洗统计：`get_cleaning_summary()`
 
 ```python
 def get_cleaning_summary(df_original: pd.DataFrame, df_cleaned: pd.DataFrame) -> dict:
@@ -135,13 +160,13 @@ def get_cleaning_summary(df_original: pd.DataFrame, df_cleaned: pd.DataFrame) ->
 
 **用途**：在 GUI 的 Data Pipeline 标签页中展示清洗前后对比。
 
-## 3.6 在 GUI 中的使用
+## 3.7 在 GUI 中的使用
 
-在 `app.py` 的 Data Pipeline 标签页中：
+在扩展版 `app_extended.py` 的 Data Pipeline 标签页中：
 
 ```python
-# 获取清洗统计
-summary = get_cleaning_summary(df_raw, df)
+# 预计算清洗统计（启动时只计算一次）
+PIPELINE_SUMMARY = get_cleaning_summary(df_raw, df)
 
 # 展示清洗操作
 - Removed {summary['duplicates_removed']} duplicate rows
