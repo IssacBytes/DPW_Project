@@ -1,6 +1,6 @@
 """
-COVID-19 Data Analysis Platform — Extended Edition
-Adds 5 advanced analysis tabs on top of the original 8.
+COVID-19 Data Analysis Platform
+Adds advanced analysis tabs on top of the original 8.
 Run: python app_extended.py
 Original app.py is NOT modified.
 """
@@ -32,6 +32,7 @@ from src.visualization import (
     plot_choropleth_map, plot_trend_line, plot_bar_chart,
     plot_dual_axis, plot_growth_rate, plot_scatter
 )
+from src.start_page import build_start_page
 
 # ── Advanced imports ──────────────────────────────────────────────────
 from src.advanced_analysis import (
@@ -206,11 +207,11 @@ def stat_card(label, value, subtitle=''):
     })
 
 
-def section_header(title, subtitle=None):
-    """Section header with optional subtitle."""
+def section_header(title, subtitle=None, subtitle_class=None):
+    """Section header with optional subtitle and animation class."""
     children = [html.Div(title, style=TYPOGRAPHY['section_title'])]
     if subtitle:
-        children.append(html.Div(subtitle, style={**TYPOGRAPHY['section_subtitle'], 'marginTop': '2px'}))
+        children.append(html.Div(subtitle, style={**TYPOGRAPHY['section_subtitle'], 'marginTop': '2px'}, className=subtitle_class or ''))
     return html.Div(children, style={'marginBottom': '16px'})
 
 
@@ -243,9 +244,9 @@ SIDEBAR_GROUPS = [
         'label': 'Trend Analysis',
         'group_id': 'group-trend',
         'items': [
-            {'label': 'Time Series', 'nav_id': 'time-series', 'value': 'tab-deepdive'},
+            {'label': 'Time Series', 'nav_id': 'time-series', 'value': 'tab-timeseries'},
             {'label': 'Moving Average', 'nav_id': 'moving-average', 'value': 'tab-ma'},
-            {'label': 'Growth Rate', 'nav_id': 'growth-rate', 'value': 'tab-deepdive'},
+            {'label': 'Growth Rate', 'nav_id': 'growth-rate', 'value': 'tab-growthrate'},
             {'label': 'Fatality Trend', 'nav_id': 'fatality-trend', 'value': 'tab-fatality'},
         ]
     },
@@ -312,7 +313,7 @@ app = dash.Dash(
         'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap'
     ],
     suppress_callback_exceptions=True,
-    title='COVID-19 Data Explorer — Extended'
+    title='COVID-19 Data Explorer'
 )
 
 PLOTLY_CONFIG = {'displayModeBar': True, 'displaylogo': False,
@@ -484,7 +485,7 @@ _sidebar = html.Div([
     **sidebar_container_style(False)
 })
 
-app.layout = html.Div([
+MAIN_APP_LAYOUT = html.Div([
     dcc.Store(id='sidebar-state', data={'collapsed': False, 'active_tab': DEFAULT_TAB, 'active_nav': DEFAULT_NAV}),
     dcc.Store(id='group-states', data={group['group_id']: (gi == 0) for gi, group in enumerate(SIDEBAR_GROUPS)}),
 
@@ -496,7 +497,6 @@ app.layout = html.Div([
             html.Div([
                 html.Div([
                     html.Span('COVID-19 Data Explorer', style=TYPOGRAPHY['page_title']),
-                    html.Span('Extended Edition', style={**TYPOGRAPHY['page_subtitle'], 'marginLeft': '14px'}),
                 ], style={'display': 'flex', 'alignItems': 'baseline', 'gap': '0', 'minWidth': '0'}),
                 html.Button('Exit', id='exit-btn', n_clicks=0,
                            style={'padding': '8px 22px', 'background': '#fff',
@@ -540,12 +540,42 @@ app.layout = html.Div([
 
             # ── Footer ──
             html.Div([
-                html.Div('Data: Our World in Data | Extended Analysis',
+                html.Div('Data: Our World in Data | Advanced Analysis',
                         style={'textAlign': 'center', 'padding': '10px', 'fontSize': '11px', 'color': '#aaa', 'fontFamily': FONT_FAMILY})
             ])
         ], style={'flex': '1', 'display': 'flex', 'flexDirection': 'column', 'minWidth': '0'})
     ], style={'display': 'flex', 'minHeight': '100vh', 'alignItems': 'stretch'})
 ], style={'fontFamily': FONT_FAMILY, 'background': BG_COLOR, 'minHeight': '100vh'})
+
+app.layout = html.Div([
+    dcc.Store(id='start-page-state', data={'entered': False}),
+    html.Div(build_start_page(), id='app-root')
+], style={'minHeight': '100vh'})
+
+
+@app.callback(
+    Output('app-root', 'children'),
+    Input('start-page-state', 'data')
+)
+def render_app_root(start_state):
+    if start_state and start_state.get('entered'):
+        return MAIN_APP_LAYOUT
+    return build_start_page()
+
+
+@app.callback(
+    Output('start-page-state', 'data'),
+    [Input('start-enter-btn', 'n_clicks'),
+     Input('start-nav-btn', 'n_clicks')],
+    State('start-page-state', 'data'),
+    prevent_initial_call=True
+)
+def enter_dashboard(hero_clicks, nav_clicks, start_state):
+    if (hero_clicks or 0) > 0 or (nav_clicks or 0) > 0:
+        state = dict(start_state or {})
+        state['entered'] = True
+        return state
+    return dash.no_update
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -656,19 +686,20 @@ def toggle_group(*args):
 # Tab Renderer
 # ═══════════════════════════════════════════════════════════════════════
 def render_tab_content(tab, metric, country, compare_list):
-    if tab == 'tab-pipeline':   return build_pipeline()
-    if tab == 'tab-overview':   return build_overview(metric)
-    if tab == 'tab-global':     return build_global(metric, compare_list)
-    if tab == 'tab-compare':    return build_compare(metric, country, compare_list)
-    if tab == 'tab-deepdive':   return build_deepdive(metric, country)
-    if tab == 'tab-rankings':   return build_rankings(metric)
-    if tab == 'tab-correlation': return build_correlation(metric)
-    if tab == 'tab-continent':  return build_continent(metric)
-    if tab == 'tab-ma':         return build_ma_tab(metric, country)
-    if tab == 'tab-anomaly':    return build_anomaly_tab(metric, country)
-    if tab == 'tab-fatality':   return build_fatality_tab(country)
-    if tab == 'tab-lag':        return build_lag_tab(country)
-    if tab == 'tab-cluster':    return build_cluster_tab()
+    if tab == 'tab-pipeline':     return build_pipeline()
+    if tab == 'tab-overview':     return build_overview(metric)
+    if tab == 'tab-global':       return build_global(metric, compare_list)
+    if tab == 'tab-compare':      return build_compare(metric, country, compare_list)
+    if tab == 'tab-timeseries':   return build_timeseries(metric, country)
+    if tab == 'tab-growthrate':   return build_growth_rate_page(metric, country)
+    if tab == 'tab-rankings':     return build_rankings(metric)
+    if tab == 'tab-correlation':  return build_correlation(metric)
+    if tab == 'tab-continent':    return build_continent(metric)
+    if tab == 'tab-ma':           return build_ma_tab(metric, country)
+    if tab == 'tab-anomaly':      return build_anomaly_tab(metric, country)
+    if tab == 'tab-fatality':     return build_fatality_tab(country)
+    if tab == 'tab-lag':          return build_lag_tab(country)
+    if tab == 'tab-cluster':      return build_cluster_tab()
     return html.Div()
 
 
@@ -740,8 +771,7 @@ def build_pipeline():
             ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '14px',
                       'paddingBottom': '10px', 'borderBottom': '1px solid #f0f0f0'}),
             html.Div([
-                html.Div([
-                    html.Div('Cleaning Actions', style=TYPOGRAPHY['kpi_label']),
+                html.Div([html.Div('Cleaning Actions', style=TYPOGRAPHY['kpi_label']),
                     html.Ul([
                         html.Li(f'Removed {summary["duplicates_removed"]:,} duplicate rows', style={'fontSize': '13px', 'color': '#444', 'fontFamily': FONT_FAMILY}),
                         html.Li('Sorted by country and date', style={'fontSize': '13px', 'color': '#444', 'fontFamily': FONT_FAMILY}),
@@ -955,22 +985,31 @@ def make_deepdive_stats(country, metric, label):
     ]
 
 
-def build_deepdive(metric, country):
-    """Country Deep Dive tab."""
+def build_timeseries(metric, country):
+    """Time Series tab: dual-axis chart only."""
     metric_label = next((m['label'] for m in METRICS if m['id'] == metric), metric)
     vacc_metric = 'people_fully_vaccinated_per_hundred'
     stats_cards = make_deepdive_stats(country, metric, metric_label)
     return html.Div([
         html.Div(stats_cards, style={'display': 'grid', 'gridTemplateColumns': 'repeat(auto-fit, minmax(170px, 1fr))',
                                      'gap': '16px', 'marginBottom': '20px'}),
-        section_header('Time Series & Growth Rate', f'{country} — {metric_label}'),
+        section_header('Time Series Analysis', f'{country} — {metric_label}'),
         card([
-            html.Div(f'{metric_label} vs Vaccination Rate', style={'fontSize': '14px', 'fontWeight': '600', 'color': '#444', 'fontFamily': FONT_FAMILY, 'marginBottom': '10px'}),
-            dcc.Graph(figure=plot_dual_axis(df, country, metric, vacc_metric), style={'height': '460px', 'width': '100%'}, config=PLOTLY_CONFIG)
-        ], style_extra={'marginBottom': '20px'}),
+            dcc.Graph(id='timeseries-chart', figure=plot_dual_axis(df, country, metric, vacc_metric), style={'height': '500px', 'width': '100%'}, config=PLOTLY_CONFIG)
+        ])
+    ])
+
+
+def build_growth_rate_page(metric, country):
+    """Growth Rate tab: standalone growth rate chart."""
+    metric_label = next((m['label'] for m in METRICS if m['id'] == metric), metric)
+    stats_cards = make_deepdive_stats(country, metric, metric_label)
+    return html.Div([
+        html.Div(stats_cards, style={'display': 'grid', 'gridTemplateColumns': 'repeat(auto-fit, minmax(170px, 1fr))',
+                                     'gap': '16px', 'marginBottom': '20px'}),
+        section_header('Growth Rate Analysis', f'{country} — Daily growth rate of {metric_label}', subtitle_class='animate-subtitle'),
         card([
-            html.Div('Growth Rate Analysis', style={'fontSize': '14px', 'fontWeight': '600', 'color': '#444', 'fontFamily': FONT_FAMILY, 'marginBottom': '10px'}),
-            dcc.Graph(figure=plot_growth_rate(df, country, metric), style={'height': '540px', 'width': '100%'}, config=PLOTLY_CONFIG)
+            dcc.Graph(figure=plot_growth_rate(df, country, metric), style={'height': '500px', 'width': '100%'}, config=PLOTLY_CONFIG)
         ])
     ])
 
@@ -1772,6 +1811,6 @@ app.clientside_callback(
 # Main
 # ═══════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
-    print("Starting COVID-19 Data Explorer — Extended Edition...")
+    print("Starting COVID-19 Data Explorer...")
     print(f"Open http://127.0.0.1:8051 in your browser")
     app.run(debug=False, host='127.0.0.1', port=8051)

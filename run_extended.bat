@@ -1,9 +1,9 @@
 @echo off
 chcp 65001 >nul
-title COVID-19 Data Explorer - Extended Edition
+title COVID-19 Data Explorer
 
 echo ================================================
-    COVID-19 Data Explorer - Extended Edition
+    COVID-19 Data Explorer
     (13 Tabs: Pipeline, Overview, Global Trends,
      Country Comparison, Deep Dive, Rankings,
      Correlation, Continent, Moving Avg, Anomalies,

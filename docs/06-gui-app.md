@@ -1,6 +1,6 @@
 # 6. GUI 应用
 
-**对应源文件**：`app.py`
+**对应源文件**：`app.py`（基础版）、`app_extended.py`（扩展版）
 
 ## 6.1 技术栈
 
@@ -10,8 +10,9 @@
 | **dash-bootstrap-components** | UI 组件库（按钮、卡片、布局） |
 | **Plotly** | 交互式图表 |
 | **pandas / numpy** | 数据处理 |
+| **scikit-learn** | 聚类分析（扩展版） |
 
-## 6.2 应用结构
+## 6.2 基础版应用结构 (app.py)
 
 ```
 app.py 结构：
@@ -31,28 +32,6 @@ app.py 结构：
 └── 9. 主入口（app.run）
 ```
 
-## 6.3 布局详解
-
-### 顶部导航栏
-
-```python
-html.Div([
-    html.Span('COVID-19 Data Explorer', style={...}),  # 标题
-    html.Span('| Our World in Data', style={...}),      # 副标题
-    html.Button('Exit', id='exit-btn', ...)             # 退出按钮
-])
-```
-
-### 全局控件栏
-
-三个下拉框，在所有标签页中共享：
-
-| 控件 | ID | 功能 |
-|------|----|------|
-| 指标选择 | `global-metric` | 选择 12 个分析指标之一 |
-| 国家选择 | `global-country` | 选择主要分析的国家 |
-| 对比选择 | `global-compare` | 选择要对比的其他国家（可多选，最多 6 个） |
-
 ### 8 个标签页
 
 ```python
@@ -68,296 +47,149 @@ TABS = [
 ]
 ```
 
-## 6.4 标签页构建函数
+## 6.3 扩展版应用结构 (app_extended.py)
 
-### `build_pipeline_tab()` — 数据管道
-
-展示数据从加载到清洗的完整流程。
-
-**三个步骤**：
-1. **Step 1: Data Loading** — 源文件、总行数、总列数、日期范围
-2. **Step 2: Data Cleaning** — 清洗操作列表 + 清洗前后对比统计
-3. **Step 3: Column Overview** — 所有列的数据类型、空值数、示例值表格
-
-**调用的模块函数**：
-- `data_cleaner.get_cleaning_summary(df_raw, df)`
-- `data_loader.get_columns_info(df)`
-
-### `build_overview_tab(metric)` — 概览
-
-快速了解数据集整体情况。
-
-**组件**：
-- 4 个统计卡片（国家总数、日期范围、总行数、全球总计）
-- 可翻页的数据表格（前 100 行）
-
-**调用的模块函数**：
-- `data_analysis.descriptive_stats(df, metric)`
-
-### `build_global_tab(metric)` — 全球趋势
-
-通过地图和时间轴观察疫情在全球的时空演变。
-
-**组件**：
-- 世界地图（Choropleth Map）
-- 全球统计面板（总计、平均、最大、国家数）
-- 时间轴滑块（每月采样，带播放按钮）
-- 趋势折线图
-
-**调用的模块函数**：
-- `visualization.plot_choropleth_map(df, metric, date)`
-- `visualization.plot_trend_line(filtered_df, countries, metric)`
-
-### `build_compare_tab(metric, country, compare_list)` — 国家对比
-
-对比多个国家在同一指标上的表现。
-
-**组件**：
-- 多线折线图（最多 6 个国家）
-
-**调用的模块函数**：
-- `visualization.plot_trend_line(df, all_c, metric)`
-
-### `build_deepdive_tab(metric, country)` — 国家深度分析
-
-深入分析单个国家的疫情数据。
-
-**组件**：
-- 双轴图（指标 vs 疫苗接种率）
-- 增长率分析图（上：数值，下：增长率）
-
-**调用的模块函数**：
-- `visualization.plot_dual_axis(df, country, metric, vacc_metric)`
-- `visualization.plot_growth_rate(df, country, metric)`
-
-### `build_rankings_tab(metric)` — 排名
-
-查看各国在选定指标上的排名。
-
-**组件**：
-- 前 20 名水平柱状图（按大洲着色）
-
-**调用的模块函数**：
-- `data_analysis.top_countries(df, metric, n=20)`
-- `visualization.plot_bar_chart(top_df, ...)`
-
-### `build_correlation_tab(metric)` — 相关性
-
-探索两个指标之间的关联性。
-
-**组件**：
-- 散点图（按大洲着色）
-
-**自动匹配相关指标**：
-- 病例 → 死亡
-- 死亡 → 病例
-- 疫苗 → 病例
-
-**调用的模块函数**：
-- `visualization.plot_scatter(plot_df, ...)`
-
-### `build_continent_tab(metric)` — 大洲分析
-
-从大洲维度观察疫情分布。
-
-**组件**：
-- 大洲汇总水平柱状图
-
-**调用的模块函数**：
-- `visualization.plot_bar_chart(cont_df, ...)`
-
-## 6.5 交互回调（Callbacks）
-
-### 标签页切换回调
-
-```python
-@app.callback(
-    Output('tab-content', 'children'),
-    [Input('main-tabs', 'value'),
-     Input('global-metric', 'value'),
-     Input('global-country', 'value'),
-     Input('global-compare', 'value')]
-)
-def render_tab(tab, metric, country, compare_list):
-    # 根据 tab 值调用对应的 build_*_tab() 函数
-```
-
-### 地图更新回调
-
-```python
-@app.callback(
-    Output('global-map', 'figure'),
-    [Input('global-metric', 'value'),
-     Input('global-slider', 'value')]
-)
-def update_global_map(metric, slider_val):
-    return plot_choropleth_map(df, metric, MONTHLY_DATES[slider_val])
-```
-
-### 趋势图更新回调（带二分查找优化）
-
-```python
-@app.callback(
-    Output('global-trend-chart', 'figure'),
-    [Input('global-metric', 'value'),
-     Input('global-country', 'value'),
-     Input('global-compare', 'value'),
-     Input('global-slider', 'value')]
-)
-def update_global_trend(metric, country, compare_list, slider_val):
-    # 使用 np.searchsorted 快速过滤日期
-    max_date = pd.Timestamp(MONTHLY_DATES[slider_val])
-    idx = np.searchsorted(date_values, max_date, side='right')
-    filtered_df = df_sorted.iloc[:idx]
-    return plot_trend_line(filtered_df, all_c, metric)
-```
-
-### 时间轴播放回调
-
-```python
-# 点击播放按钮切换 Interval 的启用状态
-@app.callback(
-    Output('play-interval', 'disabled'),
-    Input('global-play', 'n_clicks'),
-    State('play-interval', 'disabled')
-)
-def toggle_play(n_clicks, disabled):
-    return not disabled
-
-# Interval 每次触发时推进滑块
-@app.callback(
-    Output('global-slider', 'value'),
-    Input('play-interval', 'n_intervals'),
-    State('global-slider', 'value')
-)
-def advance_play(n_intervals, current):
-    next_val = current + 1
-    if next_val >= len(MONTHLY_DATES):
-        return 0  # 循环播放
-    return next_val
-```
-
-### 退出按钮回调（客户端）
-
-```python
-app.clientside_callback(
-    """
-    function(n_clicks) {
-        if (n_clicks > 0) {
-            window.close();
-        }
-        return 'Exit';
-    }
-    """,
-    Output('exit-btn', 'children'),
-    Input('exit-btn', 'n_clicks')
-)
-```
-
-## 6.6 12 个分析指标
-
-| 指标 ID | 显示名称 | 分组 |
-|---------|----------|------|
-| `new_cases_smoothed` | Daily New Cases | Cases |
-| `new_deaths_smoothed` | Daily New Deaths | Deaths |
-| `new_cases_smoothed_per_million` | New Cases per Million | Cases |
-| `new_deaths_smoothed_per_million` | New Deaths per Million | Deaths |
-| `total_cases_per_million` | Total Cases per Million | Cases |
-| `total_deaths_per_million` | Total Deaths per Million | Deaths |
-| `people_fully_vaccinated_per_hundred` | Fully Vaccinated (%) | Vaccination |
-| `people_vaccinated_per_hundred` | Vaccinated (%) | Vaccination |
-| `total_boosters_per_hundred` | Boosters (%) | Vaccination |
-| `positive_rate` | Positive Test Rate | Testing |
-| `stringency_index` | Stringency Index | Policy |
-| `reproduction_rate` | Reproduction Rate | Epidemiology |
-
-## 6.7 性能优化
-
-| 优化 | 说明 |
-|------|------|
-| **Pickle 缓存** | 缓存清洗后的 DataFrame，二次启动仅需 0.5 秒 |
-| **二分查找过滤** | `np.searchsorted()` 实现 57 万行数据的快速日期过滤 |
-| **时间轴采样** | 每月采样一个日期，减少滑块卡顿 |
-| **关闭 debug 模式** | 避免 Flask 双重重载 |
-
----
-
-## 6.8 扩展版组件清单（`app_extended.py`）
-
-扩展版在基础版 8 个标签页之上新增 5 个高级分析标签页，共 13 个标签页。布局采用**左侧可折叠侧栏导航**替代传统的横向 `dcc.Tabs`。
-
-### 6.8.1 布局结构
+### 6.3.1 布局结构
 
 ```
 ┌──────────┬──────────────────────────────────────────┐
 │  侧栏    │  Header (标题 + Exit)                     │
 │  (可折叠) ├──────────────────────────────────────────┤
 │          │  全局控制栏 (Metric | Country | Compare)   │
-│  📊 数据  ├──────────────────────────────────────────┤
-│  ├─Pipeline│                                         │
-│  ├─Overview│  tab-content (内容区)                   │
-│  └─Global │                                         │
-│  📈 分析  │                                         │
-│  ├─Compare│                                         │
-│  ├─DeepDive│                                        │
-│  ├─Rankings│                                        │
-│  ├─Correl.│                                         │
-│  └─Continent│                                       │
-│  🔬 高级  │                                         │
-│  ├─MovAvg │                                         │
-│  ├─Anomaly│                                         │
-│  ├─Fatality│                                        │
-│  ├─LeadLag│                                         │
-│  └─Cluster│                                         │
+│  O 概览  ├──────────────────────────────────────────┤
+│  ├─Global│                                          │
+│  ├─Stats │  tab-content (内容区)                    │
+│  └─Time  │                                          │
+│  C 对比  │                                          │
+│  ├─Cntry │                                          │
+│  ├─Cont  │                                          │
+│  └─Rank  │                                          │
+│  T 趋势  │                                          │
+│  ├─Series│                                          │
+│  ├─MA    │                                          │
+│  ├─Growth│                                          │
+│  └─Fatal │                                          │
+│  R 关系  │                                          │
+│  ├─Corr  │                                          │
+│  └─Lag   │                                          │
+│  AI 高级 │                                          │
+│  ├─Clus  │                                          │
+│  └─Anom  │                                          │
 │          │  Footer                                   │
 └──────────┴──────────────────────────────────────────┘
 ```
 
-### 6.8.2 侧栏导航（Sidebar）
+### 6.3.2 设计系统
 
-侧栏可折叠为窄条（仅显示分组图标），点击 `◀`/`▶` 按钮切换。
+扩展版使用完整的设计 Token 系统，确保 UI 一致性：
+
+```python
+# 字体
+FONT_FAMILY = "'Inter', 'Segoe UI', Arial, sans-serif"
+
+# 排版层级
+TYPOGRAPHY = {
+    'page_title':     {'fontSize': '30px', 'fontWeight': '700', 'color': '#111827'},
+    'page_subtitle':  {'fontSize': '14px', 'fontWeight': '500', 'color': '#6b7280'},
+    'section_title':  {'fontSize': '20px', 'fontWeight': '650', 'color': '#111827'},
+    'section_subtitle': {'fontSize': '14px', 'fontWeight': '400', 'color': '#6b7280'},
+    'kpi_number':     {'fontSize': '32px', 'fontWeight': '700', 'color': '#17172e'},
+    'kpi_label':      {'fontSize': '11px', 'fontWeight': '700', 'color': '#7b8190'},
+    'kpi_subtitle':   {'fontSize': '13px', 'fontWeight': '400', 'color': '#9ca3af'},
+    'body_text':      {'fontSize': '14px', 'fontWeight': '400', 'color': '#4b5563'},
+    'control_label':  {'fontSize': '11px', 'fontWeight': '700', 'color': '#6b7280'},
+}
+
+# 卡片样式
+CARD_STYLE = {
+    'background': '#ffffff',
+    'borderRadius': '12px',
+    'boxShadow': '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)',
+    'padding': '22px 24px',
+    'border': 'none',
+}
+
+# 背景色
+BG_COLOR = '#f0f2f5'
+
+# 侧栏配色
+SIDEBAR_BG = '#1e1e2e'
+SIDEBAR_HOVER = '#2a2a3e'
+SIDEBAR_ACTIVE_BG = '#2563eb'
+SIDEBAR_TEXT = '#c8c8d0'
+SIDEBAR_TEXT_MUTED = '#6b6b80'
+```
+
+### 6.3.3 侧栏导航（Sidebar）
+
+侧栏可折叠为窄条（仅显示短标签），点击 `◀`/`▶` 按钮切换。
+
+**5 个导航分组：**
+
+| 分组 | 图标 | 子页面 |
+|------|:----:|--------|
+| **Overview** | O | Global Trends, Summary Statistics, Pandemic Timeline |
+| **Comparison Analysis** | C | Country Comparison, Continent Comparison, Rankings |
+| **Trend Analysis** | T | Time Series, Moving Average, Growth Rate, Fatality Trend |
+| **Relationship Analysis** | R | Correlation, Lead-Lag Analysis |
+| **Advanced Analytics** | AI | Clustering, Anomaly Detection |
+
+**侧栏组件：**
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
 | `sidebar-container` | `html.Div` | 侧栏容器（深色背景，flex 列布局） |
-| `sidebar-collapsed` | `html.Div` | 折叠状态（仅显示 📊 📈 🔬 图标） |
+| `sidebar-collapsed` | `html.Div` | 折叠状态（仅显示短标签） |
 | `sidebar-expanded` | `html.Div` | 展开状态（完整导航面板） |
-| `sidebar-toggle` | `html.Div` | 折叠/展开切换按钮（◀ / ▶） |
-| `sidebar-state` | `dcc.Store` | 存储侧栏状态（collapsed / active_tab） |
+| `sidebar-toggle` | `html.Div` | 展开状态下的折叠按钮（◀） |
+| `sidebar-toggle-collapsed` | `html.Div` | 折叠状态下的展开按钮（▶） |
+| `sidebar-state` | `dcc.Store` | 存储侧栏状态（collapsed / active_tab / active_nav） |
 | `group-states` | `dcc.Store` | 存储各分组展开/折叠状态 |
-
-**3 个导航分组：**
-
-| 分组 | 图标 | 子页面 |
-|------|:----:|--------|
-| **Data Overview** | 📊 | Data Pipeline, Overview, Global Trends |
-| **Analysis Tools** | 📈 | Country Comparison, Country Deep Dive, Rankings, Correlation, Continent Analysis |
-| **Advanced** | 🔬 | Moving Avg, Anomalies, Fatality, Lead-Lag, Clusters |
-
-**分组交互组件：**
-
-| 组件 ID | 类型 | 说明 |
-|---------|------|------|
 | `group-header-{group_id}` | `html.Div` | 分组标题（点击展开/折叠） |
-| `group-arrow-{group_id}` | `html.Span` | 箭头指示器（▾ 展开 / ▸ 折叠） |
+| `group-arrow-{group_id}` | `html.Span` | 箭头指示器（▼ 展开 / ▶ 折叠） |
 | `group-items-{group_id}` | `html.Div` | 子页面列表容器 |
-| `sidebar-item-{nav_id}` | `html.Div` | 子页面按钮（点击切换内容，`nav_id` 保证复用同一 tab 的入口也有唯一组件 ID） |
+| `sidebar-item-{nav_id}` | `html.Div` | 子页面按钮（点击切换内容） |
+| `collapsed-item-{nav_id}` | `html.Div` | 折叠状态下的子页面按钮 |
 
-### 6.8.3 顶层容器
+### 6.3.4 14 个标签页
+
+```python
+ALL_TAB_VALUES = [
+    'tab-global',      # Global Trends
+    'tab-overview',    # Summary Statistics
+    'tab-pipeline',    # Pandemic Timeline
+    'tab-compare',     # Country Comparison
+    'tab-continent',   # Continent Comparison
+    'tab-rankings',    # Rankings
+    'tab-timeseries',  # Time Series
+    'tab-ma',          # Moving Average
+    'tab-growthrate',  # Growth Rate
+    'tab-fatality',    # Fatality Trend
+    'tab-correlation', # Correlation
+    'tab-lag',         # Lead-Lag Analysis
+    'tab-cluster',     # Clustering
+    'tab-anomaly',     # Anomaly Detection
+]
+```
+
+### 6.3.5 顶层容器
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
 | — | `html.Div` | 整个页面的根容器（`app.layout`） |
+| `sidebar-state` | `dcc.Store` | 侧栏状态存储 |
+| `group-states` | `dcc.Store` | 分组展开状态存储 |
 
-### 6.8.4 Header（顶部栏）
+### 6.3.6 Header（顶部栏）
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
 | — | `html.Div` | Header 容器（flex 布局，标题 + Exit 按钮） |
-| — | `html.Span` | 标题文字 "COVID-19 Data Explorer \| Extended Edition" |
+| — | `html.Span` | 标题文字 "COVID-19 Data Explorer" |
+| — | `html.Span` | 副标题 "Extended Edition" |
 | `exit-btn` | `html.Button` | Exit 按钮（点击关闭浏览器标签页） |
 
-### 6.8.5 全局控制栏（Global Controls）
+### 6.3.7 全局控制栏（Global Controls）
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
@@ -366,15 +198,15 @@ app.clientside_callback(
 | `global-country` | `dcc.Dropdown` | 国家选择（262 个国家） |
 | `global-compare` | `dcc.Dropdown` | 对比国家选择（多选，最多 6 国） |
 
-### 6.8.6 标签页内容区
+### 6.3.8 标签页内容区
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
 | `tab-content` | `html.Div` | 内容容器，根据侧栏选中项动态渲染 |
 
-### 6.8.7 各标签页内部组件
+### 6.3.9 各标签页内部组件
 
-#### Data Pipeline
+#### Pandemic Timeline
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
@@ -382,7 +214,7 @@ app.clientside_callback(
 | — | `html.Div` | Step 2 数据清洗（清洗操作 + 结果对比） |
 | — | `dash_table.DataTable` | Step 3 列概览表格（列名/类型/非空/空值/示例值） |
 
-#### Overview
+#### Summary Statistics
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
@@ -410,12 +242,18 @@ app.clientside_callback(
 |---------|------|------|
 | — | `dcc.Graph` | 多国对比折线图（无 ID，直接传 figure） |
 
-#### Country Deep Dive
+#### Time Series
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
+| — | 6 个 `stat_card` | 统计卡片（最新值/峰值/平均/总计/增长率/最大增长） |
 | — | `dcc.Graph` | 双轴图（指标 vs 疫苗接种率） |
-| — | `dcc.Graph` | 增长率分析图 |
+
+#### Growth Rate
+
+| 组件 ID | 类型 | 说明 |
+|---------|------|------|
+| — | `dcc.Graph` | 增长率分析图（上：数值，下：增长率） |
 
 #### Rankings
 
@@ -427,21 +265,30 @@ app.clientside_callback(
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
-| — | `dcc.Graph` | 散点图 |
+| `corr-x` | `dcc.Dropdown` | X 轴指标选择 |
+| `corr-y` | `dcc.Dropdown` | Y 轴指标选择 |
+| `corr-color` | `dcc.Dropdown` | 着色方式选择 |
+| `correlation-insight` | `html.Div` | 相关性分析结论面板 |
+| `correlation-chart` | `dcc.Graph` | 散点图 |
 
-#### Continent Analysis
+#### Continent Comparison
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
 | — | `dcc.Graph` | 大洲柱状图 |
 
-#### Moving Avg（高级）
+#### Moving Average
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
-| `ma-chart` | `dcc.Graph` | 移动平均线图 |
+| `ma-stats` | `html.Div` | 6 个统计卡片 |
+| `ma-range` | `dcc.Dropdown` | 时间段选择（全量/2020/2021/2022/2023/近180天） |
+| `ma-show-raw` | `dcc.Checklist` | 是否显示原始数据 |
+| `ma-main-chart` | `dcc.Graph` | 主趋势图（原始 + 7日MA + 30日MA） |
+| `ma-recent-chart` | `dcc.Graph` | 窗口对比图（7/14/30 日 MA） |
+| `ma-diff-chart` | `dcc.Graph` | 动量图（7日MA - 30日MA） |
 
-#### Anomalies（高级）
+#### Anomaly Detection
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
@@ -449,22 +296,23 @@ app.clientside_callback(
 | `anomaly-threshold` | `dcc.Dropdown` | 阈值选择（1.5σ~3.0σ） |
 | `anomaly-chart` | `dcc.Graph` | 异常检测图 |
 
-#### Fatality（高级）
+#### Fatality Trend
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
-| `fatality-chart` | `dcc.Graph` | 病死率双轴图 |
-| `fatality-stats` | `html.Div` | 统计卡片（CFR/总病例/总死亡/峰值/趋势） |
+| `fatality-chart` | `dcc.Graph` | 病死率双面板图（上：CFR趋势，下：差距柱状图） |
+| `fatality-stats` | `html.Div` | 5 个统计卡片（CFR/总病例/总死亡/峰值/趋势） |
 
-#### Lead-Lag（高级）
+#### Lead-Lag Analysis
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
 | `lag-x` | `dcc.Dropdown` | 领先指标选择 |
 | `lag-y` | `dcc.Dropdown` | 滞后指标选择 |
+| `lag-insight` | `html.Div` | 滞后分析结论面板 |
 | `lag-chart` | `dcc.Graph` | 滞后相关性柱状图 |
 
-#### Clusters（高级）
+#### Clustering
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
@@ -472,70 +320,218 @@ app.clientside_callback(
 | `cluster-scatter` | `dcc.Graph` | 聚类散点图 |
 | `cluster-summary` | `html.Div` | 聚类摘要卡片 |
 
-### 6.8.8 Footer（底部）
+### 6.3.10 Footer（底部）
 
 | 组件 ID | 类型 | 说明 |
 |---------|------|------|
-| — | `html.Hr` | 分隔线 |
 | — | `html.Div` | 版权文字 "Data: Our World in Data \| Extended Analysis" |
 
-### 6.8.9 组件统计汇总
+### 6.3.11 组件统计汇总
 
 | 类别 | 数量 |
 |------|:----:|
-| **有 ID 的组件** | **28 个**（可通过回调直接引用） |
-| **无 ID 的组件** | 约 15 个（静态布局元素） |
-| **dcc.Graph（图表）** | 12 个 |
-| **dcc.Dropdown（下拉框）** | 9 个 |
+| **有 ID 的组件** | **约 40 个**（可通过回调直接引用） |
+| **dcc.Graph（图表）** | 14 个 |
+| **dcc.Dropdown（下拉框）** | 12 个 |
 | **dash_table.DataTable（表格）** | 2 个 |
 | **dcc.Slider（滑块）** | 1 个 |
 | **dcc.Interval（定时器）** | 1 个 |
-| **html.Button（按钮）** | 2 个（Exit + Play） |
+| **dcc.Store（状态存储）** | 2 个 |
+| **dcc.Checklist（复选框）** | 1 个 |
 | **dcc.DatePickerRange（日期选择）** | 1 个 |
+| **html.Button（按钮）** | 2 个（Exit + Play） |
 
----
+## 6.4 交互回调（Callbacks）
 
-## 6.9 扩展版侧栏分组更新
+### 侧栏状态回调
 
-`app_extended.py` 的侧栏按分析任务重新分组，只调整导航结构，不新增或删除分析功能，现有 tab value 和图表回调保持不变。
+```python
+# 侧栏折叠/展开 + 导航切换
+@app.callback(
+    Output('sidebar-state', 'data'),
+    [Input('sidebar-toggle', 'n_clicks'),
+     Input('sidebar-toggle-collapsed', 'n_clicks')] +
+    [Input(f'sidebar-item-{item["nav_id"]}', 'n_clicks') for item in ALL_TAB_ITEMS] +
+    [Input(f'collapsed-item-{item["nav_id"]}', 'n_clicks') for item in ALL_TAB_ITEMS],
+    State('sidebar-state', 'data')
+)
+def update_sidebar_state(*args):
+    # 切换折叠状态或更新 active_tab
+    ...
 
-### Overview
+# 侧栏布局同步
+@app.callback(
+    [Output('sidebar-container', 'style'),
+     Output('sidebar-collapsed', 'style'),
+     Output('sidebar-expanded', 'style')] +
+    [Output(f'sidebar-item-{item["nav_id"]}', 'style') for item in ALL_TAB_ITEMS] +
+    [Output(f'collapsed-item-{item["nav_id"]}', 'style') for item in ALL_TAB_ITEMS],
+    Input('sidebar-state', 'data')
+)
+def sync_sidebar_layout(state):
+    # 根据 collapsed/active_nav 更新所有侧栏元素样式
+    ...
 
-| 页面 | 对应 tab |
-|------|----------|
-| Global Trends | `tab-global` |
-| Summary Statistics | `tab-overview` |
-| Pandemic Timeline | `tab-pipeline` |
+# 分组展开/折叠
+@app.callback(
+    [Output(f'group-items-{group["group_id"]}', 'style') for group in SIDEBAR_GROUPS] +
+    [Output(f'group-arrow-{group["group_id"]}', 'style') for group in SIDEBAR_GROUPS] +
+    [Output(f'group-arrow-{group["group_id"]}', 'children') for group in SIDEBAR_GROUPS] +
+    [Output('group-states', 'data')],
+    [Input(f'group-header-{group["group_id"]}', 'n_clicks') for group in SIDEBAR_GROUPS],
+    State('group-states', 'data')
+)
+def toggle_group(*args):
+    # 切换分组的展开/折叠状态
+    ...
+```
 
-### Comparison Analysis
+### 标签页渲染回调
 
-| 页面 | 对应 tab |
-|------|----------|
-| Country Comparison | `tab-compare` |
-| Continent Comparison | `tab-continent` |
-| Rankings | `tab-rankings` |
+```python
+@app.callback(
+    Output('tab-content', 'children'),
+    [Input('sidebar-state', 'data'),
+     Input('global-metric', 'value'),
+     Input('global-country', 'value'),
+     Input('global-compare', 'value')]
+)
+def render_active_tab(sidebar_state, metric, country, compare_list):
+    tab = (sidebar_state or {}).get('active_tab', DEFAULT_TAB)
+    return html.Div(
+        render_tab_content(tab, metric, country, compare_list),
+        className='page-shell page-enter',
+        key=f'{tab}-{metric}-{country}'
+    )
+```
 
-### Trend Analysis
+### 地图更新回调
 
-| 页面 | 对应 tab |
-|------|----------|
-| Time Series | `tab-deepdive` |
-| Moving Average | `tab-ma` |
-| Growth Rate | `tab-deepdive` |
-| Fatality Trend | `tab-fatality` |
+```python
+@app.callback(
+    Output('global-map', 'figure'),
+    [Input('global-metric', 'value'),
+     Input('global-slider', 'value')]
+)
+def update_global_map(metric, slider_val):
+    return plot_choropleth_map(df, metric, MONTHLY_DATES[slider_val])
+```
 
-`Time Series` 和 `Growth Rate` 当前复用 Country Deep Dive 页面，因此都指向 `tab-deepdive`。侧栏内部使用独立 `nav_id` 区分两个入口，避免 Dash 组件 ID 重复。
+### 趋势图更新回调（带二分查找优化）
 
-### Relationship Analysis
+```python
+@app.callback(
+    Output('global-trend-chart', 'figure'),
+    [Input('global-metric', 'value'),
+     Input('global-country', 'value'),
+     Input('global-compare', 'value'),
+     Input('global-slider', 'value')]
+)
+def update_global_trend(metric, country, compare_list, slider_val):
+    max_date = pd.Timestamp(MONTHLY_DATES[slider_val])
+    idx = np.searchsorted(date_values, max_date, side='right')
+    filtered_df = df_sorted.iloc[:idx]
+    return plot_trend_line(filtered_df, all_c, metric, ...)
+```
 
-| 页面 | 对应 tab |
-|------|----------|
-| Correlation | `tab-correlation` |
-| Lead-Lag Analysis | `tab-lag` |
+### 时间轴播放回调
 
-### Advanced Analytics
+```python
+@app.callback(Output('play-interval', 'disabled'), Input('global-play', 'n_clicks'), State('play-interval', 'disabled'))
+def toggle_play(n_clicks, disabled):
+    return not disabled
 
-| 页面 | 对应 tab |
-|------|----------|
-| Clustering | `tab-cluster` |
-| Anomaly Detection | `tab-anomaly` |
+@app.callback(Output('global-slider', 'value'), [Input('play-interval', 'n_intervals')], [State('global-slider', 'value')])
+def advance_play(n_intervals, current):
+    next_val = current + 1
+    if next_val >= len(MONTHLY_DATES):
+        return 0  # 循环播放
+    return next_val
+```
+
+### 高级分析回调
+
+```python
+# 相关性
+@app.callback(
+    [Output('correlation-chart', 'figure'), Output('correlation-insight', 'children')],
+    [Input('corr-x', 'value'), Input('corr-y', 'value'), Input('corr-color', 'value')]
+)
+def update_correlation_chart(x_metric, y_metric, color_col):
+    return make_correlation_figure(...), correlation_insight(...)
+
+# 移动平均
+@app.callback(
+    [Output('ma-main-chart', 'figure'), Output('ma-recent-chart', 'figure'),
+     Output('ma-diff-chart', 'figure'), Output('ma-stats', 'children')],
+    [Input('global-metric', 'value'), Input('global-country', 'value'),
+     Input('ma-range', 'value'), Input('ma-show-raw', 'value')]
+)
+def update_moving_average(metric, country, view_range, show_raw_values):
+    ...
+
+# 异常检测
+@app.callback(Output('anomaly-chart', 'figure'),
+    [Input('global-metric', 'value'), Input('global-country', 'value'),
+     Input('anomaly-window', 'value'), Input('anomaly-threshold', 'value')])
+def update_anomaly(metric, country, window, threshold):
+    ...
+
+# 病死率
+@app.callback(
+    [Output('fatality-chart', 'figure'), Output('fatality-stats', 'children')],
+    [Input('global-country', 'value'), Input('global-compare', 'value')])
+def update_fatality(country, compare_list):
+    ...
+
+# 滞后分析
+@app.callback(
+    [Output('lag-chart', 'figure'), Output('lag-insight', 'children')],
+    [Input('global-country', 'value'), Input('lag-x', 'value'), Input('lag-y', 'value')])
+def update_lag(country, x_metric, y_metric):
+    ...
+
+# 聚类
+@app.callback([Output('cluster-scatter', 'figure'), Output('cluster-summary', 'children')],
+    [Input('cluster-n', 'value')])
+def update_cluster(k):
+    ...
+```
+
+### 退出按钮回调（客户端）
+
+```python
+app.clientside_callback(
+    """function(n_clicks) { if (n_clicks > 0) { window.close(); } return 'Exit'; }""",
+    Output('exit-btn', 'children'),
+    Input('exit-btn', 'n_clicks')
+)
+```
+
+## 6.5 12 个分析指标
+
+| 指标 ID | 显示名称 | 分组 |
+|---------|----------|------|
+| `new_cases_smoothed` | Daily New Cases | Cases |
+| `new_deaths_smoothed` | Daily New Deaths | Deaths |
+| `new_cases_smoothed_per_million` | New Cases per Million | Cases |
+| `new_deaths_smoothed_per_million` | New Deaths per Million | Deaths |
+| `total_cases_per_million` | Total Cases per Million | Cases |
+| `total_deaths_per_million` | Total Deaths per Million | Deaths |
+| `people_fully_vaccinated_per_hundred` | Fully Vaccinated (%) | Vaccination |
+| `people_vaccinated_per_hundred` | Vaccinated (%) | Vaccination |
+| `total_boosters_per_hundred` | Boosters (%) | Vaccination |
+| `positive_rate` | Positive Test Rate | Testing |
+| `stringency_index` | Stringency Index | Policy |
+| `reproduction_rate` | Reproduction Rate | Epidemiology |
+
+## 6.6 性能优化
+
+| 优化 | 说明 |
+|------|------|
+| **Pickle 缓存** | 缓存清洗后的 DataFrame，二次启动仅需 0.5 秒 |
+| **二分查找过滤** | `np.searchsorted()` 实现 57 万行数据的快速日期过滤 |
+| **时间轴采样** | 每月采样一个日期，减少滑块卡顿 |
+| **预计算管道数据** | `PIPELINE_SUMMARY` 和 `PIPELINE_COLS_INFO` 启动时只计算一次 |
+| **聚类缓存** | `CLUSTER_CACHE` 缓存不同 k 值的聚类结果，避免重复计算 |
+| **关闭 debug 模式** | 避免 Flask 双重重载 |

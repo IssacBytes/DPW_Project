@@ -235,9 +235,13 @@ def plot_bar_chart(df, x_col, y_col, title, color_col=None):
 def plot_dual_axis(df, country, metric_left, metric_right):
     """
     Dual-axis chart comparing two metrics over time.
-    Fix: use matches='x' to keep x-axis synced when zooming.
+    Fix: autosize=False + width=1050 + dtick to lock y-axis range after tab switch.
     """
     country_df = df[df['country'] == country].sort_values('date')
+    y_min = country_df[metric_left].min()
+    y_max = country_df[metric_left].max()
+    y2_min = country_df[metric_right].min()
+    y2_max = country_df[metric_right].max()
     
     fig = make_subplots(specs=[[{'secondary_y': True}]])
     
@@ -264,8 +268,21 @@ def plot_dual_axis(df, country, metric_left, metric_right):
     _apply_base(fig)
     _apply_axes(fig)
     
-    # Fix: lock x-axis range so both traces share the same zoom
     fig.update_xaxes(matches='x')
+    
+    # Lock y-axis range + dtick so tab-switch never recalculates layout
+    fig.update_yaxes(
+        range=[y_min * 0.95, y_max * 1.05],
+        dtick=max(1, (y_max - y_min) / 6),
+        row=1, col=1
+    )
+    
+    # Lock right y-axis range to match red line data
+    fig.update_yaxes(
+        range=[y2_min * 0.95, y2_max * 1.05],
+        dtick=max(0.1, (y2_max - y2_min) / 6),
+        secondary_y=True
+    )
     
     fig.update_layout(
         title={'text': f'{country}', 'x': 0.5, 'xanchor': 'center',
@@ -276,8 +293,10 @@ def plot_dual_axis(df, country, metric_left, metric_right):
                 'bgcolor': 'rgba(255,255,255,0.85)'},
         hovermode='x unified',
         hoverlabel={'bgcolor': 'white', 'font_size': 12, 'bordercolor': '#ccc'},
-        height=480,
-        margin={'l': 60, 'r': 78, 't': 58, 'b': 96}
+        height=500,
+        width=1050,
+        autosize=False,
+        margin={'l': 60, 'r': 78, 't': 58, 'b': 96},
     )
     
     return fig
@@ -286,7 +305,7 @@ def plot_dual_axis(df, country, metric_left, metric_right):
 def plot_growth_rate(df, country, metric):
     """
     Two-panel chart: values + growth rate.
-    Fix: use matches='x' to keep x-axis synced when zooming.
+    Fix: autosize=False + width=1050 + dtick to lock y-axis after tab switch.
     """
     from src.data_analysis import growth_rate_analysis
     growth_df = growth_rate_analysis(df, country, metric).dropna()
@@ -320,16 +339,33 @@ def plot_growth_rate(df, country, metric):
     _apply_base(fig)
     _apply_axes(fig)
     
-    # Fix: lock x-axis range so both panels share the same zoom
     fig.update_xaxes(matches='x')
+    
+    # Lock y-axis ranges + dtick so tab-switch never recalculates layout
+    vmin = growth_df[metric].min()
+    vmax = growth_df[metric].max()
+    fig.update_yaxes(
+        range=[vmin * 0.95, vmax * 1.05],
+        dtick=max(1, (vmax - vmin) / 6),
+        row=1, col=1
+    )
+    gr_min = growth_df['growth_rate'].min()
+    gr_max = growth_df['growth_rate'].max()
+    fig.update_yaxes(
+        range=[min(gr_min * 1.1, gr_min - 2), max(gr_max * 1.1, gr_max + 2)],
+        dtick=max(0.5, (gr_max - gr_min) / 5),
+        row=2, col=1
+    )
     
     fig.update_layout(
         title={'text': f'{country}: Growth Analysis', 'x': 0.5, 'xanchor': 'center',
                'font': {'size': 14, 'color': '#222'}},
         hovermode='x unified',
         hoverlabel={'bgcolor': 'white', 'font_size': 12, 'bordercolor': '#ccc'},
-        height=560,
-        margin={'l': 60, 'r': 28, 't': 88, 'b': 48}
+        height=500,
+        width=1050,
+        autosize=False,
+        margin={'l': 60, 'r': 28, 't': 88, 'b': 48},
     )
     fig.update_annotations(font={'size': 13, 'color': '#222'})
     
