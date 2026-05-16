@@ -191,12 +191,12 @@ def plot_trend_line(df, countries, metric, title=None):
     return fig
 
 
-def plot_bar_chart(df, x_col, y_col, title, color_col=None):
+def plot_bar_chart(df, x_col, y_col, title, color_col=None, value_format=',.0f', xaxis_title=None, sort_values=True):
     """
     Clean horizontal bar chart for rankings.
     Fix: drop NA in color column to avoid Plotly sorting error.
     """
-    plot_df = df.sort_values(y_col, ascending=True)
+    plot_df = df.sort_values(y_col, ascending=True) if sort_values else df.copy()
     
     # Drop rows with NA in color column to avoid Plotly sorting error
     if color_col and color_col in plot_df.columns:
@@ -212,7 +212,7 @@ def plot_bar_chart(df, x_col, y_col, title, color_col=None):
     fig.update_traces(
         marker_line_color='rgba(0,0,0,0.05)',
         marker_line_width=0.5,
-        hovertemplate='%{y}<br>%{x:,.0f}<extra></extra>'
+        hovertemplate=f'%{{y}}<br>%{{x:{value_format}}}<extra></extra>'
     )
     
     _apply_base(fig)
@@ -221,7 +221,7 @@ def plot_bar_chart(df, x_col, y_col, title, color_col=None):
     fig.update_layout(
         title={'text': title, 'x': 0.5, 'xanchor': 'center',
                'font': {'size': 14, 'color': '#222'}},
-        xaxis={'tickformat': ',.0f', 'gridcolor': '#e8e8e8'},
+        xaxis={'tickformat': value_format, 'gridcolor': '#e8e8e8', 'title': xaxis_title},
         yaxis={'gridcolor': '#e8e8e8'},
         showlegend=False,
         hovermode='y unified',

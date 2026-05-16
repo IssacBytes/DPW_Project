@@ -6,11 +6,11 @@ Original app.py is NOT modified.
 """
 
 import dash
-from dash import dcc, html, Input, Output, State, dash_table
+from dash import dcc, html, Input, Output, State, dash_table, ALL
 import dash_bootstrap_components as dbc
 import pandas as pd
 import numpy as np
-import os, pickle, time
+import os, pickle, time, threading, traceback
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
@@ -46,35 +46,29 @@ from src.advanced_analysis import (
 DATA_PATH = 'compact.csv'
 CACHE_PATH = 'data_cache.pkl'
 
-print("Loading data...", end=' ', flush=True)
-t0 = time.time()
+DATA_STATE = {
+    'ready': False,
+    'loading': False,
+    'error': None,
+    'message': 'Waiting to load COVID-19 dataset...',
+    'started_at': None,
+    'finished_at': None,
+}
+DATA_LOCK = threading.Lock()
 
-if os.path.exists(CACHE_PATH):
-    with open(CACHE_PATH, 'rb') as f:
-        df_raw, df = pickle.load(f)
-else:
-    print("Running full preprocessing pipeline...")
-    processor = CovidDataPreprocessor(DATA_PATH)
-    df_raw = processor.load_data()
-    processor.clean_data()
-    df = processor.prepare_for_analysis(variables=None)
-    df = handle_missing_values(df, strategy='ffill')
-    with open(CACHE_PATH, 'wb') as f:
-        pickle.dump((df_raw, df), f)
-
-countries = get_countries(df)
-continents = get_continents(df)
-date_min, date_max = get_date_range(df)
-numeric_cols = get_numeric_columns(df)
-all_dates = sorted(df['date'].dt.strftime('%Y-%m-%d').unique())
-MONTHLY_DATES = all_dates[::30]
-if all_dates[-1] not in MONTHLY_DATES:
-    MONTHLY_DATES.append(all_dates[-1])
-df_sorted = df.sort_values('date').reset_index(drop=True)
-date_values = df_sorted['date'].values
-
-print(f"done ({time.time()-t0:.1f}s)")
-print(f"Data: {len(df):,} rows, {len(countries)} countries, {date_min.date()} to {date_max.date()}")
+df_raw = None
+df = pd.DataFrame()
+countries = DEFAULT_COUNTRIES if 'DEFAULT_COUNTRIES' in globals() else []
+continents = []
+date_min = pd.Timestamp('2020-01-01')
+date_max = pd.Timestamp('2026-02-22')
+numeric_cols = []
+all_dates = []
+MONTHLY_DATES = []
+df_sorted = pd.DataFrame()
+date_values = np.array([])
+PIPELINE_SUMMARY = {}
+PIPELINE_COLS_INFO = []
 
 # Precompute country-level cluster inputs once; clustering pages should not scan
 # the full 570k-row time series on every tab switch or k change.
@@ -84,8 +78,111 @@ CLUSTER_FEATURES = [
     'people_fully_vaccinated_per_hundred',
     'population',
 ]
-CLUSTER_BASE_DF = df.loc[df.groupby('country')['date'].idxmax()].dropna(subset=CLUSTER_FEATURES).copy()
+CLUSTER_BASE_DF = pd.DataFrame()
 CLUSTER_CACHE = {}
+
+
+def _set_data_state(**updates):
+    with DATA_LOCK:
+        DATA_STATE.update(updates)
+
+
+def get_data_state_snapshot():
+    with DATA_LOCK:
+        return dict(DATA_STATE)
+
+
+def load_app_data():
+    """Load and precompute all dashboard data after the web server is already available."""
+    global df_raw, df, countries, continents, date_min, date_max, numeric_cols
+    global all_dates, MONTHLY_DATES, df_sorted, date_values
+    global PIPELINE_SUMMARY, PIPELINE_COLS_INFO, CLUSTER_BASE_DF, CLUSTER_CACHE
+
+    _set_data_state(loading=True, ready=False, error=None,
+                    message='Loading COVID-19 dataset...', started_at=time.time(), finished_at=None)
+    print("Loading data...", end=' ', flush=True)
+    t0 = time.time()
+
+    try:
+        if os.path.exists(CACHE_PATH):
+            _set_data_state(message='Loading cached dataset...')
+            with open(CACHE_PATH, 'rb') as f:
+                loaded_raw, loaded_df = pickle.load(f)
+        else:
+            _set_data_state(message='Running full preprocessing pipeline...')
+            print("Running full preprocessing pipeline...")
+            processor = CovidDataPreprocessor(DATA_PATH)
+            loaded_raw = processor.load_data()
+            processor.clean_data()
+            loaded_df = processor.prepare_for_analysis(variables=None)
+            loaded_df = handle_missing_values(loaded_df, strategy='ffill')
+            with open(CACHE_PATH, 'wb') as f:
+                pickle.dump((loaded_raw, loaded_df), f)
+
+        _set_data_state(message='Preparing dashboard indexes...')
+        loaded_countries = get_countries(loaded_df)
+        loaded_continents = get_continents(loaded_df)
+        loaded_date_min, loaded_date_max = get_date_range(loaded_df)
+        loaded_numeric_cols = get_numeric_columns(loaded_df)
+        loaded_all_dates = sorted(loaded_df['date'].dt.strftime('%Y-%m-%d').unique())
+        loaded_monthly_dates = loaded_all_dates[::30]
+        if loaded_all_dates and loaded_all_dates[-1] not in loaded_monthly_dates:
+            loaded_monthly_dates.append(loaded_all_dates[-1])
+        loaded_df_sorted = loaded_df.sort_values('date').reset_index(drop=True)
+
+        _set_data_state(message='Precomputing analysis summaries...')
+        loaded_pipeline_summary = get_cleaning_summary(loaded_raw, loaded_df)
+        loaded_cols_info = []
+        for col in loaded_df.columns:
+            sample = loaded_df[col].dropna().iloc[:3].tolist()
+            loaded_cols_info.append({
+                'name': col,
+                'dtype': str(loaded_df[col].dtype),
+                'non_null': int(loaded_df[col].notna().sum()),
+                'null_count': int(loaded_df[col].isna().sum()),
+                'sample_values': sample
+            })
+
+        loaded_cluster_base = loaded_df.loc[
+            loaded_df.groupby('country')['date'].idxmax()
+        ].dropna(subset=CLUSTER_FEATURES).copy()
+
+        df_raw = loaded_raw
+        df = loaded_df
+        countries = loaded_countries
+        continents = loaded_continents
+        date_min, date_max = loaded_date_min, loaded_date_max
+        numeric_cols = loaded_numeric_cols
+        all_dates = loaded_all_dates
+        MONTHLY_DATES = loaded_monthly_dates
+        df_sorted = loaded_df_sorted
+        date_values = df_sorted['date'].values
+        PIPELINE_SUMMARY = loaded_pipeline_summary
+        PIPELINE_COLS_INFO = loaded_cols_info
+        CLUSTER_BASE_DF = loaded_cluster_base
+        CLUSTER_CACHE = {}
+        for _cluster_k in range(3, 8):
+            get_cluster_df(_cluster_k)
+
+        elapsed = time.time() - t0
+        print(f"done ({elapsed:.1f}s)")
+        print(f"Data: {len(df):,} rows, {len(countries)} countries, {date_min.date()} to {date_max.date()}")
+        print(f"Pipeline data pre-computed: {len(PIPELINE_COLS_INFO)} columns")
+        _set_data_state(ready=True, loading=False, error=None, message='Ready',
+                        finished_at=time.time())
+    except Exception as exc:
+        print("failed")
+        traceback.print_exc()
+        _set_data_state(ready=False, loading=False, error=str(exc),
+                        message='Failed to load dataset', finished_at=time.time())
+
+
+def start_data_loading_thread():
+    state = get_data_state_snapshot()
+    if state.get('ready') or state.get('loading'):
+        return
+    thread = threading.Thread(target=load_app_data, name='covid-data-loader', daemon=True)
+    thread.start()
 
 # ── Constants ─────────────────────────────────────────────────────────
 METRICS = [
@@ -184,10 +281,14 @@ def card(children=None, style_extra=None, **kwargs):
     return html.Div(children, style=base_style, className=class_name, **kwargs)
 
 
-def stat_card(label, value, subtitle=''):
+def stat_card(label, value, subtitle='', card_id=None, explanation_key=None, clickable=False):
     """Modern KPI stat card with clear hierarchy."""
-    return html.Div([
-        html.Div(label, style=TYPOGRAPHY['kpi_label']),
+    is_clickable = clickable and card_id and explanation_key
+    children = [
+        html.Div([
+            html.Div(label, style=TYPOGRAPHY['kpi_label']),
+            html.Div('Details', className='stat-card-details') if is_clickable else None,
+        ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'space-between', 'gap': '12px'}),
         html.Div(value, style={
             **TYPOGRAPHY['kpi_number'],
             'lineHeight': '1.08',
@@ -198,13 +299,33 @@ def stat_card(label, value, subtitle=''):
             'textOverflow': 'ellipsis',
         }),
         html.Div(subtitle, style=TYPOGRAPHY['kpi_subtitle']) if subtitle else None
-    ], className='stat-card animate-card', style={
+    ]
+    props = {}
+    class_name = 'stat-card animate-card'
+    style = {
         'flex': '1 1 190px', 'minWidth': '190px',
         'background': '#ffffff', 'padding': '20px 24px',
         'borderRadius': '12px', 'border': 'none',
         'boxShadow': '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)',
         'overflow': 'hidden',
-    })
+    }
+    if is_clickable:
+        props.update({
+            'id': {
+                'type': 'trend-stat-card',
+                'card_id': card_id,
+                'explanation_key': explanation_key,
+            },
+            'n_clicks': 0,
+            'role': 'button',
+            'tabIndex': 0,
+        })
+        class_name += ' stat-card-clickable'
+        style['cursor'] = 'pointer'
+
+    return html.Div([
+        child for child in children if child is not None
+    ], className=class_name, style=style, **props)
 
 
 def section_header(title, subtitle=None, subtitle_class=None):
@@ -213,6 +334,153 @@ def section_header(title, subtitle=None, subtitle_class=None):
     if subtitle:
         children.append(html.Div(subtitle, style={**TYPOGRAPHY['section_subtitle'], 'marginTop': '2px'}, className=subtitle_class or ''))
     return html.Div(children, style={'marginBottom': '16px'})
+
+
+TREND_STAT_EXPLANATIONS = {
+    'latest-value': {
+        'title': 'Latest Value',
+        'what': 'The most recent non-zero value available for the selected location and metric.',
+        'calculation': 'The selected location time series is sorted by date, missing values are removed, and the latest active record is selected.',
+        'reading': 'Use it as the current endpoint of the trend. Compare it with the peak and average cards to understand whether the selected metric is still elevated or has returned closer to baseline.',
+        'caution': 'If the result is n/a or unusually low, the selected location or metric may have incomplete late-period reporting.',
+    },
+    'peak-value': {
+        'title': 'Peak Value',
+        'what': 'The highest observed value for the selected location and metric across the available time series.',
+        'calculation': 'After filtering valid records, the row with the maximum metric value is selected.',
+        'reading': 'Use it to identify the strongest historical wave or maximum pressure point for the selected metric.',
+        'caution': 'Peak values can be affected by reporting backlogs, data corrections, or one-day anomalies.',
+    },
+    'average': {
+        'title': 'Average',
+        'what': 'The mean value of the selected metric across the active period for the selected location.',
+        'calculation': 'Valid active records are averaged after missing values are removed.',
+        'reading': 'Use it as a baseline for comparing the latest value and peak value.',
+        'caution': 'A long quiet period can lower the average, while a short severe wave can raise it.',
+    },
+    'total-area': {
+        'title': 'Total / Area',
+        'what': 'A cumulative summary of the selected metric over the active time series.',
+        'calculation': 'Daily-style metrics are summed. For rate or per-capita metrics, this behaves like an area-under-the-curve summary rather than a true population total.',
+        'reading': 'Use it to compare the overall scale or sustained burden of the selected metric.',
+        'caution': 'For rates, percentages, and normalized metrics, interpret this as cumulative exposure, not as a direct count.',
+    },
+    'latest-growth': {
+        'title': 'Latest Growth',
+        'what': 'The most recent day-over-day percentage change for the selected metric.',
+        'calculation': 'The app computes daily percentage change from the filtered location time series and uses the latest valid growth value.',
+        'reading': 'Positive values suggest recent acceleration; negative values suggest recent decline.',
+        'caution': 'Growth percentages become unstable when the previous value is very small or zero.',
+    },
+    'max-growth': {
+        'title': 'Max Growth',
+        'what': 'The largest observed day-over-day growth signal for the selected metric.',
+        'calculation': 'Daily growth rates are computed and capped at 500% before selecting the maximum.',
+        'reading': 'Use it to spot sudden acceleration phases, especially early outbreak periods.',
+        'caution': 'This can be driven by low starting values or reporting corrections, so it should be read with the trend chart.',
+    },
+    'latest-raw': {
+        'title': 'Latest Raw',
+        'what': 'The latest unsmoothed daily value used as the base series for the moving-average analysis.',
+        'calculation': 'The app selects the latest active row from the base metric before applying moving-average smoothing.',
+        'reading': 'Use it to compare the newest daily signal against the smoothed short-term and baseline trends.',
+        'caution': 'Raw daily values are noisy and can swing because of weekend reporting or data revisions.',
+    },
+    '7-day-ma': {
+        'title': '7-Day MA',
+        'what': 'A short-term moving average that smooths daily noise while staying responsive to recent changes.',
+        'calculation': 'The base metric is averaged over a rolling 7-day window.',
+        'reading': 'Use it to understand the current short-term direction of the selected metric.',
+        'caution': 'It can still move quickly during volatile reporting periods.',
+    },
+    '30-day-ma': {
+        'title': '30-Day MA',
+        'what': 'A longer baseline moving average used to show the broader trend.',
+        'calculation': 'The base metric is averaged over a rolling 30-day window.',
+        'reading': 'Use it as the baseline for deciding whether recent values are above or below the broader trend.',
+        'caution': 'It reacts slowly and may lag behind sharp turning points.',
+    },
+    '7-vs-30': {
+        'title': '7 vs 30',
+        'what': 'The difference between the 7-day moving average and the 30-day moving average.',
+        'calculation': 'The app subtracts the 30-day moving average from the 7-day moving average at the latest valid date.',
+        'reading': 'A positive value indicates short-term momentum above baseline. A negative value indicates short-term momentum below baseline.',
+        'caution': 'The signal is most useful when both moving averages are based on enough valid records.',
+    },
+    'peak-7-day-ma': {
+        'title': 'Peak 7-Day MA',
+        'what': 'The highest short-term smoothed value observed in the selected moving-average series.',
+        'calculation': 'The app selects the maximum value from the 7-day moving-average series.',
+        'reading': 'Use it to identify the strongest smoothed wave in the selected period.',
+        'caution': 'Changing the view range can change which peak is selected.',
+    },
+    'trend': {
+        'title': 'Trend',
+        'what': 'A simple status label comparing short-term movement against the broader baseline.',
+        'calculation': 'The app compares the 7-day moving average with the 30-day moving average using a small tolerance band.',
+        'reading': 'Rising means short-term values are above baseline; Falling means they are below baseline; Stable means they are close.',
+        'caution': 'This is a summary indicator, not a forecast.',
+    },
+    'cumulative-cfr': {
+        'title': 'Cumulative CFR',
+        'what': 'The all-time case fatality ratio for the selected location.',
+        'calculation': 'Total deaths are divided by total cases and multiplied by 100.',
+        'reading': 'Use it as the long-run fatality baseline for the location.',
+        'caution': 'CFR depends on testing coverage, reporting quality, demographics, and healthcare capacity.',
+    },
+    'recent-fatality': {
+        'title': 'Recent Fatality',
+        'what': 'A recent fatality ratio designed to compare recent deaths with earlier recent cases.',
+        'calculation': 'The app compares 30-day deaths with 30-day cases shifted by 14 days to account for the delay from cases to deaths.',
+        'reading': 'Use it to understand whether recent fatality conditions differ from the cumulative baseline.',
+        'caution': 'It requires enough recent cases to be stable; otherwise the value may show as n/a.',
+    },
+    'fatality-gap': {
+        'title': 'Fatality Gap',
+        'what': 'The difference between recent fatality and cumulative CFR.',
+        'calculation': 'Recent fatality ratio minus cumulative CFR, shown in percentage points.',
+        'reading': 'Positive values suggest recent fatality is above long-run baseline; negative values suggest it is below baseline.',
+        'caution': 'A gap can reflect reporting delays, changes in testing, vaccination, healthcare pressure, or variant severity.',
+    },
+    'peak-recent-ratio': {
+        'title': 'Peak Recent Ratio',
+        'what': 'The highest recent fatality ratio observed for the selected location.',
+        'calculation': 'The app selects the maximum valid recent fatality ratio from the fatality time series.',
+        'reading': 'Use it to identify the period when recent fatality pressure was highest.',
+        'caution': 'This can be inflated when recent case denominators are small or incomplete.',
+    },
+    'total-deaths': {
+        'title': 'Total Deaths',
+        'what': 'The cumulative number of reported deaths for the selected location.',
+        'calculation': 'The app uses the latest valid total deaths value from the selected location time series.',
+        'reading': 'Use it to understand the absolute mortality burden.',
+        'caution': 'Reported deaths can differ from excess mortality and may vary by reporting standards.',
+    },
+    'no-data': {
+        'title': 'No Data',
+        'what': 'No valid records are available for this location and metric combination.',
+        'calculation': 'The selected time series has no usable non-null observations for the required calculation.',
+        'reading': 'Try another location, metric, or view range.',
+        'caution': 'Some locations and indicators have incomplete historical coverage.',
+    },
+}
+
+
+def build_trend_stat_modal_body(explanation_key):
+    explanation = TREND_STAT_EXPLANATIONS.get(explanation_key, TREND_STAT_EXPLANATIONS['no-data'])
+    sections = [
+        ('What it means', explanation['what']),
+        ('How it is calculated', explanation['calculation']),
+        ('How to read it', explanation['reading']),
+        ('Caution', explanation['caution']),
+    ]
+    return html.Div([
+        html.Div([
+            html.Div(title, style=TYPOGRAPHY['control_label']),
+            html.Div(text, style={**TYPOGRAPHY['body_text'], 'lineHeight': '1.55', 'marginTop': '4px'}),
+        ], className='trend-stat-modal-section')
+        for title, text in sections
+    ], className='trend-stat-modal-body')
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -234,7 +502,7 @@ SIDEBAR_GROUPS = [
         'label': 'Comparison Analysis',
         'group_id': 'group-comparison',
         'items': [
-            {'label': 'Country Comparison', 'nav_id': 'country-comparison', 'value': 'tab-compare'},
+            {'label': 'Location Comparison', 'nav_id': 'country-comparison', 'value': 'tab-compare'},
             {'label': 'Continent Comparison', 'nav_id': 'continent-comparison', 'value': 'tab-continent'},
             {'label': 'Rankings', 'nav_id': 'rankings', 'value': 'tab-rankings'},
         ]
@@ -285,7 +553,7 @@ SHORT_LABEL_BY_NAV = {
     'global': 'Global',
     'summary': 'Stats',
     'timeline': 'Time',
-    'country-comparison': 'Cntry',
+    'country-comparison': 'Loc',
     'continent-comparison': 'Cont',
     'rankings': 'Rank',
     'time-series': 'Series',
@@ -485,82 +753,160 @@ _sidebar = html.Div([
     **sidebar_container_style(False)
 })
 
-MAIN_APP_LAYOUT = html.Div([
-    dcc.Store(id='sidebar-state', data={'collapsed': False, 'active_tab': DEFAULT_TAB, 'active_nav': DEFAULT_NAV}),
-    dcc.Store(id='group-states', data={group['group_id']: (gi == 0) for gi, group in enumerate(SIDEBAR_GROUPS)}),
-
-    html.Div([
-        _sidebar,
+def build_main_app_layout():
+    return html.Div([
+        dcc.Store(id='sidebar-state', data={'collapsed': False, 'active_tab': DEFAULT_TAB, 'active_nav': DEFAULT_NAV}),
+        dcc.Store(id='group-states', data={group['group_id']: (gi == 0) for gi, group in enumerate(SIDEBAR_GROUPS)}),
 
         html.Div([
-            # ── Top Header Bar ──
-            html.Div([
-                html.Div([
-                    html.Span('COVID-19 Data Explorer', style=TYPOGRAPHY['page_title']),
-                ], style={'display': 'flex', 'alignItems': 'baseline', 'gap': '0', 'minWidth': '0'}),
-                html.Button('Exit', id='exit-btn', n_clicks=0,
-                           style={'padding': '8px 22px', 'background': '#fff',
-                                  'border': '1px solid #d1d5db', 'borderRadius': '8px',
-                                  'cursor': 'pointer', 'fontSize': '14px', 'color': '#6b7280',
-                                  'fontFamily': FONT_FAMILY},
-                           className='ui-button')
-            ], style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center',
-                      'padding': '22px 40px', 'borderBottom': '1px solid #e5e7eb', 'background': '#fff'}),
+            _sidebar,
 
-            # ── Toolbar Card ──
             html.Div([
+                # ── Top Header Bar ──
                 html.Div([
-                    html.Span('Metric', style=TYPOGRAPHY['control_label']),
-                    dcc.Dropdown(id='global-metric', options=[{'label': m['label'], 'value': m['id']} for m in METRICS],
-                                 value=DEFAULT_METRIC, clearable=False, style=DROPDOWN_STYLE)
-                ], id='global-metric-control', style={'display': 'flex', 'flexDirection': 'column', 'gap': '4px'}),
-                html.Div([
-                    html.Span('Country', style=TYPOGRAPHY['control_label']),
-                    dcc.Dropdown(id='global-country', options=[{'label': c, 'value': c} for c in countries],
-                                 value=DEFAULT_COUNTRIES[0], clearable=False, style=DROPDOWN_STYLE_SMALL)
-                ], style={'display': 'flex', 'flexDirection': 'column', 'gap': '4px'}),
-                html.Div([
-                    html.Span('Compare', style=TYPOGRAPHY['control_label']),
-                    dcc.Dropdown(id='global-compare', options=[{'label': c, 'value': c} for c in countries],
-                                 value=DEFAULT_COUNTRIES[1:4], multi=True, style=DROPDOWN_STYLE)
-                ], style={'display': 'flex', 'flexDirection': 'column', 'gap': '4px'}),
-            ], style={
-                'display': 'flex', 'gap': '30px', 'alignItems': 'flex-end',
-                'padding': '18px 40px',
-                'background': '#ffffff', 'border': 'none',
-                'borderRadius': '0', 'borderBottom': '1px solid #e5e7eb',
-                'boxShadow': '0 1px 3px rgba(0,0,0,0.04)'
-            }),
+                    html.Div([
+                        html.Span('COVID-19 Data Explorer', style=TYPOGRAPHY['page_title']),
+                    ], style={'display': 'flex', 'alignItems': 'baseline', 'gap': '0', 'minWidth': '0'}),
+                    html.Button('Exit', id='exit-btn', n_clicks=0,
+                               style={'padding': '8px 22px', 'background': '#fff',
+                                      'border': '1px solid #d1d5db', 'borderRadius': '8px',
+                                      'cursor': 'pointer', 'fontSize': '14px', 'color': '#6b7280',
+                                      'fontFamily': FONT_FAMILY},
+                               className='ui-button')
+                ], style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center',
+                          'padding': '22px 40px', 'borderBottom': '1px solid #e5e7eb', 'background': '#fff'}),
 
-            # ── Tab Content ──
-            html.Div(id='tab-content', className='tab-content-frame', style={
-                'padding': CONTENT_PADDING, 'background': BG_COLOR,
-                'minHeight': 'calc(100vh - 140px)'
-            }),
+                # ── Toolbar Card ──
+                html.Div([
+                    html.Div([
+                        html.Span('Metric', style=TYPOGRAPHY['control_label']),
+                        dcc.Dropdown(id='global-metric', options=[{'label': m['label'], 'value': m['id']} for m in METRICS],
+                                     value=DEFAULT_METRIC, clearable=False, style=DROPDOWN_STYLE)
+                    ], id='global-metric-control', style={'display': 'flex', 'flexDirection': 'column', 'gap': '4px'}),
+                    html.Div([
+                        html.Span('Location', style=TYPOGRAPHY['control_label']),
+                        dcc.Dropdown(id='global-country', options=[{'label': c, 'value': c} for c in countries],
+                                     value=DEFAULT_COUNTRIES[0], clearable=False, style=DROPDOWN_STYLE_SMALL)
+                    ], id='global-country-control', style={'display': 'flex', 'flexDirection': 'column', 'gap': '4px'}),
+                    html.Div([
+                        html.Span('Aggregation', style=TYPOGRAPHY['control_label']),
+                        dcc.Dropdown(
+                            id='continent-aggregation',
+                            options=[
+                                {'label': 'Peak', 'value': 'peak'},
+                            ],
+                            value='peak', clearable=False, disabled=True, style=DROPDOWN_STYLE_SMALL
+                        )
+                    ], id='continent-aggregation-control', style={'display': 'none'}),
+                    html.Div([
+                        html.Span('Compare', style=TYPOGRAPHY['control_label']),
+                        dcc.Dropdown(id='global-compare', options=[{'label': c, 'value': c} for c in countries],
+                                     value=DEFAULT_COUNTRIES[1:4], multi=True, style=DROPDOWN_STYLE)
+                    ], id='global-compare-control', style={'display': 'flex', 'flexDirection': 'column', 'gap': '4px'}),
+                    html.Div([
+                        html.Span('Sort', style=TYPOGRAPHY['control_label']),
+                        dcc.Dropdown(
+                            id='continent-sort',
+                            options=[
+                                {'label': 'Descending', 'value': 'desc'},
+                                {'label': 'Ascending', 'value': 'asc'},
+                            ],
+                            value='desc', clearable=False, style=DROPDOWN_STYLE_SMALL
+                        )
+                    ], id='continent-sort-control', style={'display': 'none'}),
+                ], style={
+                    'display': 'flex', 'gap': '30px', 'alignItems': 'flex-end',
+                    'padding': '18px 40px',
+                    'background': '#ffffff', 'border': 'none',
+                    'borderRadius': '0', 'borderBottom': '1px solid #e5e7eb',
+                    'boxShadow': '0 1px 3px rgba(0,0,0,0.04)'
+                }),
 
-            # ── Footer ──
-            html.Div([
-                html.Div('Data: Our World in Data | Advanced Analysis',
-                        style={'textAlign': 'center', 'padding': '10px', 'fontSize': '11px', 'color': '#aaa', 'fontFamily': FONT_FAMILY})
-            ])
-        ], style={'flex': '1', 'display': 'flex', 'flexDirection': 'column', 'minWidth': '0'})
-    ], style={'display': 'flex', 'minHeight': '100vh', 'alignItems': 'stretch'})
-], style={'fontFamily': FONT_FAMILY, 'background': BG_COLOR, 'minHeight': '100vh'})
+                # ── Tab Content ──
+                html.Div(id='tab-content', className='tab-content-frame', style={
+                    'padding': CONTENT_PADDING, 'background': BG_COLOR,
+                    'minHeight': 'calc(100vh - 140px)'
+                }),
+
+                # ── Footer ──
+                html.Div([
+                    html.Div('Data: Our World in Data | Advanced Analysis',
+                            style={'textAlign': 'center', 'padding': '10px', 'fontSize': '11px', 'color': '#aaa', 'fontFamily': FONT_FAMILY})
+                ])
+            ], style={'flex': '1', 'display': 'flex', 'flexDirection': 'column', 'minWidth': '0'})
+        ], style={'display': 'flex', 'minHeight': '100vh', 'alignItems': 'stretch'}),
+
+        dbc.Modal(
+            [
+                dbc.ModalHeader(
+                    dbc.ModalTitle(id='trend-stat-modal-title', style={**TYPOGRAPHY['section_title'], 'fontSize': '18px'}),
+                    close_button=False,
+                    style={'borderBottom': '1px solid #e5e7eb', 'padding': '18px 22px'}
+                ),
+                dbc.ModalBody(id='trend-stat-modal-body', style={'padding': '20px 22px 6px'}),
+                dbc.ModalFooter(
+                    dbc.Button('Close', id='trend-stat-modal-close', n_clicks=0, className='ui-button',
+                               style={'background': '#fff', 'border': '1px solid #d1d5db', 'color': '#4b5563',
+                                      'borderRadius': '8px', 'fontFamily': FONT_FAMILY, 'fontSize': '14px'}),
+                    style={'borderTop': 'none', 'padding': '8px 22px 20px'}
+                ),
+            ],
+            id='trend-stat-modal',
+            is_open=False,
+            centered=True,
+            size='lg',
+            className='trend-stat-modal',
+            backdrop=True,
+        )
+    ], style={'fontFamily': FONT_FAMILY, 'background': BG_COLOR, 'minHeight': '100vh'})
+
+def build_start_page_from_data_state():
+    state = get_data_state_snapshot()
+    if state.get('error'):
+        return build_start_page(
+            loading=False,
+            status_text='Failed',
+            error_text=f"Unable to load dataset: {state['error']}",
+            disable_enter=True,
+        )
+    if state.get('ready'):
+        return build_start_page(
+            loading=False,
+            status_text='Ready',
+            disable_enter=False,
+        )
+
+    started_at = state.get('started_at')
+    elapsed = int(time.time() - started_at) if started_at else 0
+    message = state.get('message') or 'Loading COVID-19 dataset...'
+    if elapsed > 0:
+        message = f'{message} ({elapsed}s)'
+    return build_start_page(
+        loading=True,
+        status_text=message,
+        disable_enter=True,
+    )
+
 
 app.layout = html.Div([
     dcc.Store(id='start-page-state', data={'entered': False}),
-    html.Div(build_start_page(), id='app-root')
+    dcc.Interval(id='startup-status-interval', interval=1000, n_intervals=0),
+    html.Div(build_start_page_from_data_state(), id='app-root')
 ], style={'minHeight': '100vh'})
 
 
 @app.callback(
     Output('app-root', 'children'),
-    Input('start-page-state', 'data')
+    [Input('start-page-state', 'data'),
+     Input('startup-status-interval', 'n_intervals')]
 )
-def render_app_root(start_state):
-    if start_state and start_state.get('entered'):
-        return MAIN_APP_LAYOUT
-    return build_start_page()
+def render_app_root(start_state, _startup_ticks):
+    data_state = get_data_state_snapshot()
+    if start_state and start_state.get('entered') and data_state.get('ready'):
+        if dash.callback_context.triggered_id == 'startup-status-interval':
+            return dash.no_update
+        return build_main_app_layout()
+    return build_start_page_from_data_state()
 
 
 @app.callback(
@@ -572,6 +918,8 @@ def render_app_root(start_state):
 )
 def enter_dashboard(hero_clicks, nav_clicks, start_state):
     if (hero_clicks or 0) > 0 or (nav_clicks or 0) > 0:
+        if not get_data_state_snapshot().get('ready'):
+            return dash.no_update
         state = dict(start_state or {})
         state['entered'] = True
         return state
@@ -579,6 +927,28 @@ def enter_dashboard(hero_clicks, nav_clicks, start_state):
 
 
 # ═══════════════════════════════════════════════════════════════════════
+@app.callback(
+    [Output('trend-stat-modal', 'is_open'),
+     Output('trend-stat-modal-title', 'children'),
+     Output('trend-stat-modal-body', 'children')],
+    [Input({'type': 'trend-stat-card', 'card_id': ALL, 'explanation_key': ALL}, 'n_clicks'),
+     Input('trend-stat-modal-close', 'n_clicks')],
+    prevent_initial_call=True
+)
+def toggle_trend_stat_modal(card_clicks, close_clicks):
+    trigger_id = dash.callback_context.triggered_id
+    if trigger_id == 'trend-stat-modal-close':
+        return False, dash.no_update, dash.no_update
+    if isinstance(trigger_id, dict) and trigger_id.get('type') == 'trend-stat-card':
+        trigger_value = dash.callback_context.triggered[0].get('value') if dash.callback_context.triggered else None
+        if not trigger_value:
+            return dash.no_update, dash.no_update, dash.no_update
+        explanation_key = trigger_id.get('explanation_key', 'no-data')
+        explanation = TREND_STAT_EXPLANATIONS.get(explanation_key, TREND_STAT_EXPLANATIONS['no-data'])
+        return True, explanation['title'], build_trend_stat_modal_body(explanation_key)
+    return dash.no_update, dash.no_update, dash.no_update
+
+
 # Sidebar Callbacks
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -650,6 +1020,38 @@ def sync_global_metric_visibility(sidebar_state):
 
 
 @app.callback(
+    [Output('global-country-control', 'style'),
+     Output('global-compare-control', 'style'),
+     Output('continent-aggregation-control', 'style'),
+     Output('continent-sort-control', 'style')],
+    Input('sidebar-state', 'data')
+)
+def sync_contextual_toolbar(sidebar_state):
+    tab = (sidebar_state or {}).get('active_tab', DEFAULT_TAB)
+    visible = {'display': 'flex', 'flexDirection': 'column', 'gap': '4px'}
+    hidden = {'display': 'none'}
+    if tab == 'tab-continent':
+        return hidden, hidden, visible, visible
+    return visible, visible, hidden, hidden
+
+
+@app.callback(
+    [Output('continent-aggregation', 'options'),
+     Output('continent-aggregation', 'value'),
+     Output('continent-aggregation', 'disabled')],
+    Input('global-metric', 'value')
+)
+def sync_continent_aggregation_options(metric):
+    aggregation = default_continent_aggregation(metric)
+    labels = {
+        'peak': 'Peak',
+        'average': 'Average',
+        'total': 'Total',
+    }
+    return [{'label': labels[aggregation], 'value': aggregation}], aggregation, True
+
+
+@app.callback(
     [Output(f'group-items-{group["group_id"]}', 'style') for group in SIDEBAR_GROUPS] +
     [Output(f'group-arrow-{group["group_id"]}', 'style') for group in SIDEBAR_GROUPS] +
     [Output(f'group-arrow-{group["group_id"]}', 'children') for group in SIDEBAR_GROUPS] +
@@ -685,7 +1087,7 @@ def toggle_group(*args):
 # ═══════════════════════════════════════════════════════════════════════
 # Tab Renderer
 # ═══════════════════════════════════════════════════════════════════════
-def render_tab_content(tab, metric, country, compare_list):
+def render_tab_content(tab, metric, country, compare_list, continent_aggregation='auto', continent_sort='desc'):
     if tab == 'tab-pipeline':     return build_pipeline()
     if tab == 'tab-overview':     return build_overview(metric)
     if tab == 'tab-global':       return build_global(metric, compare_list)
@@ -694,7 +1096,7 @@ def render_tab_content(tab, metric, country, compare_list):
     if tab == 'tab-growthrate':   return build_growth_rate_page(metric, country)
     if tab == 'tab-rankings':     return build_rankings(metric)
     if tab == 'tab-correlation':  return build_correlation(metric)
-    if tab == 'tab-continent':    return build_continent(metric)
+    if tab == 'tab-continent':    return build_continent(metric, continent_aggregation, continent_sort)
     if tab == 'tab-ma':           return build_ma_tab(metric, country)
     if tab == 'tab-anomaly':      return build_anomaly_tab(metric, country)
     if tab == 'tab-fatality':     return build_fatality_tab(country)
@@ -708,16 +1110,18 @@ def render_tab_content(tab, metric, country, compare_list):
     [Input('sidebar-state', 'data'),
      Input('global-metric', 'value'),
      Input('global-country', 'value'),
-     Input('global-compare', 'value')]
+     Input('global-compare', 'value'),
+     Input('continent-aggregation', 'value'),
+     Input('continent-sort', 'value')]
 )
-def render_active_tab(sidebar_state, metric, country, compare_list):
+def render_active_tab(sidebar_state, metric, country, compare_list, continent_aggregation, continent_sort):
     tab = (sidebar_state or {}).get('active_tab', DEFAULT_TAB)
     if tab not in ALL_TAB_VALUES:
         tab = DEFAULT_TAB
     return html.Div(
-        render_tab_content(tab, metric, country, compare_list),
+        render_tab_content(tab, metric, country, compare_list, continent_aggregation, continent_sort),
         className='page-shell page-enter',
-        key=f'{tab}-{metric}-{country}'
+        key=f'{tab}-{metric}-{country}-{continent_aggregation}-{continent_sort}'
     )
 
 
@@ -726,18 +1130,6 @@ def render_active_tab(sidebar_state, metric, country, compare_list):
 # ═══════════════════════════════════════════════════════════════════════
 
 from src.data_cleaner import get_cleaning_summary
-PIPELINE_SUMMARY = get_cleaning_summary(df_raw, df)
-PIPELINE_COLS_INFO = []
-for col in df.columns:
-    sample = df[col].dropna().iloc[:3].tolist()
-    PIPELINE_COLS_INFO.append({
-        'name': col,
-        'dtype': str(df[col].dtype),
-        'non_null': int(df[col].notna().sum()),
-        'null_count': int(df[col].isna().sum()),
-        'sample_values': sample
-    })
-print(f"Pipeline data pre-computed: {len(PIPELINE_COLS_INFO)} columns")
 
 
 def build_pipeline():
@@ -774,8 +1166,8 @@ def build_pipeline():
                 html.Div([html.Div('Cleaning Actions', style=TYPOGRAPHY['kpi_label']),
                     html.Ul([
                         html.Li(f'Removed {summary["duplicates_removed"]:,} duplicate rows', style={'fontSize': '13px', 'color': '#444', 'fontFamily': FONT_FAMILY}),
-                        html.Li('Sorted by country and date', style={'fontSize': '13px', 'color': '#444', 'fontFamily': FONT_FAMILY}),
-                        html.Li('Forward-filled missing values within each country', style={'fontSize': '13px', 'color': '#444', 'fontFamily': FONT_FAMILY}),
+                        html.Li('Sorted by location and date', style={'fontSize': '13px', 'color': '#444', 'fontFamily': FONT_FAMILY}),
+                        html.Li('Forward-filled missing values within each location', style={'fontSize': '13px', 'color': '#444', 'fontFamily': FONT_FAMILY}),
                         html.Li('Backward-filled remaining NaNs at start of series', style={'fontSize': '13px', 'color': '#444', 'fontFamily': FONT_FAMILY}),
                     ], style={'margin': '8px 0 0', 'paddingLeft': '20px'})
                 ], style={'flex': '1'}),
@@ -840,6 +1232,72 @@ def format_overview_table_records(table_df):
     return display_df.to_dict('records')
 
 
+def filter_overview_data(country_filter, start_date, end_date):
+    filtered = df.copy()
+    if country_filter and country_filter != 'ALL':
+        filtered = filtered[filtered['country'] == country_filter]
+    else:
+        filtered = filtered[filtered['continent'].notna()]
+    if start_date:
+        filtered = filtered[filtered['date'] >= pd.Timestamp(start_date)]
+    if end_date:
+        filtered = filtered[filtered['date'] <= pd.Timestamp(end_date)]
+    return filtered
+
+
+def latest_country_rows(filtered_df):
+    if filtered_df.empty:
+        return filtered_df
+    valid_rows = filtered_df.dropna(subset=['country', 'date']).copy()
+    if valid_rows.empty:
+        return valid_rows
+    return valid_rows.loc[valid_rows.groupby('country')['date'].idxmax()].copy()
+
+
+def overview_metric_item(label, value, color):
+    return html.Div([
+        html.Div(label, style=TYPOGRAPHY['kpi_label']),
+        html.Div(value, style={
+            'fontSize': '22px',
+            'fontWeight': '700',
+            'color': color,
+            'fontFamily': FONT_FAMILY,
+            'fontVariantNumeric': 'tabular-nums',
+        })
+    ], style={'textAlign': 'center', 'padding': '10px 12px'})
+
+
+def build_overview_key_metrics(country_filter='ALL', start_date=None, end_date=None):
+    filtered = filter_overview_data(country_filter, start_date, end_date)
+    latest_rows = latest_country_rows(filtered)
+
+    if latest_rows.empty:
+        return [
+            overview_metric_item('Total Cases', 'n/a', '#2563eb'),
+            overview_metric_item('Total Deaths', 'n/a', '#dc2626'),
+            overview_metric_item('Fully Vaccinated', 'n/a', '#16a34a'),
+            overview_metric_item('Vaccination Rate', 'n/a', '#16a34a'),
+        ]
+
+    total_cases = latest_rows['total_cases'].fillna(0).sum()
+    total_deaths = latest_rows['total_deaths'].fillna(0).sum()
+    fully_vaccinated = latest_rows['people_fully_vaccinated'].fillna(0).sum()
+    population = latest_rows['population'].fillna(0).sum()
+    raw_vaccination_rate = (fully_vaccinated / population * 100) if population > 0 else np.nan
+    vaccination_rate = min(raw_vaccination_rate, 100.0) if not pd.isna(raw_vaccination_rate) else np.nan
+
+    return [
+        overview_metric_item('Total Cases', f'{int(total_cases):,}', '#2563eb'),
+        overview_metric_item('Total Deaths', f'{int(total_deaths):,}', '#dc2626'),
+        overview_metric_item('Fully Vaccinated', f'{int(fully_vaccinated):,}', '#16a34a'),
+        overview_metric_item(
+            'Vaccination Rate',
+            f'{vaccination_rate:.1f}%' if not pd.isna(vaccination_rate) else 'n/a',
+            '#16a34a',
+        ),
+    ]
+
+
 def build_overview(metric):
     metric_label = next((m['label'] for m in METRICS if m['id'] == metric), metric)
     stats = descriptive_stats(df, metric)
@@ -857,7 +1315,7 @@ def build_overview(metric):
     return html.Div([
         section_header('Summary Statistics', f'Key metrics overview — {metric_label}'),
         html.Div([
-            stat_card('Total Countries', f'{len(countries)}', ''),
+            stat_card('Total Locations', f'{len(countries)}', ''),
             stat_card('Date Range', f'{date_min.date()}', f'to {date_max.date()}'),
             stat_card('Total Rows', f'{len(df):,}', 'data points'),
             stat_card('Global Total', f'{latest[metric].sum():,.0f}', metric_label),
@@ -866,19 +1324,18 @@ def build_overview(metric):
 
         card([
             html.Div('Key Metrics', style={**TYPOGRAPHY['section_title'], 'marginBottom': '18px'}),
-            html.Div(id='overview-key-metrics', children=[
-                html.Div([html.Div('Total Cases', style=TYPOGRAPHY['kpi_label']), html.Div(f'{int(df["total_cases"].max()):,}', style={'fontSize': '22px', 'fontWeight': '700', 'color': '#2563eb', 'fontFamily': FONT_FAMILY, 'fontVariantNumeric': 'tabular-nums'})], style={'textAlign': 'center', 'padding': '10px 12px'}),
-                html.Div([html.Div('Total Deaths', style=TYPOGRAPHY['kpi_label']), html.Div(f'{int(df["total_deaths"].max()):,}', style={'fontSize': '22px', 'fontWeight': '700', 'color': '#dc2626', 'fontFamily': FONT_FAMILY, 'fontVariantNumeric': 'tabular-nums'})], style={'textAlign': 'center', 'padding': '10px 12px'}),
-                html.Div([html.Div('Fully Vaccinated', style=TYPOGRAPHY['kpi_label']), html.Div(f'{int(df["people_fully_vaccinated"].max()):,}', style={'fontSize': '22px', 'fontWeight': '700', 'color': '#16a34a', 'fontFamily': FONT_FAMILY, 'fontVariantNumeric': 'tabular-nums'})], style={'textAlign': 'center', 'padding': '10px 12px'}),
-                html.Div([html.Div('Vaccination Rate', style=TYPOGRAPHY['kpi_label']), html.Div(f'{round(df["people_fully_vaccinated_per_hundred"].max(), 1)}%', style={'fontSize': '22px', 'fontWeight': '700', 'color': '#16a34a', 'fontFamily': FONT_FAMILY, 'fontVariantNumeric': 'tabular-nums'})], style={'textAlign': 'center', 'padding': '10px 12px'}),
-            ], style={'display': 'grid', 'gridTemplateColumns': 'repeat(4, minmax(150px, 1fr))', 'gap': '14px'})
+            html.Div(
+                id='overview-key-metrics',
+                children=build_overview_key_metrics('ALL', date_min.date(), date_max.date()),
+                style={'display': 'grid', 'gridTemplateColumns': 'repeat(4, minmax(150px, 1fr))', 'gap': '14px'}
+            )
         ], style_extra={'marginBottom': '20px'}),
 
         card([
             html.Div([
-                html.Span('Country Summary', style={**TYPOGRAPHY['section_title']}),
+                html.Span('Location Summary', style={**TYPOGRAPHY['section_title']}),
                 html.Div([
-                    html.Span('Filter by country:', style={'fontSize': '13px', 'color': '#6b7280', 'marginRight': '6px', 'fontFamily': FONT_FAMILY}),
+                    html.Span('Filter by location:', style={'fontSize': '13px', 'color': '#6b7280', 'marginRight': '6px', 'fontFamily': FONT_FAMILY}),
                     dcc.Dropdown(id='overview-country-filter', options=[{'label': 'All Countries', 'value': 'ALL'}] + [{'label': c, 'value': c} for c in countries], value='ALL', clearable=False, style={'width': '220px', 'fontSize': '14px', 'fontFamily': FONT_FAMILY, 'display': 'inline-block'}),
                     html.Span('Date range:', style={'fontSize': '13px', 'color': '#6b7280', 'marginLeft': '12px', 'marginRight': '6px', 'fontFamily': FONT_FAMILY}),
                     dcc.DatePickerRange(id='overview-date-range', min_date_allowed=date_min.date(), max_date_allowed=date_max.date(), start_date=date_min.date(), end_date=date_max.date()),
@@ -930,17 +1387,17 @@ def build_global(metric, compare_list):
 
 
 def build_compare(metric, country, compare_list):
-    """Country Comparison tab."""
+    """Location Comparison tab."""
     metric_label = next((m['label'] for m in METRICS if m['id'] == metric), metric)
     all_c = [country]
     if compare_list:
         all_c.extend([c for c in compare_list if c != country])
     all_c = list(dict.fromkeys(all_c))[:6]
     return html.Div([
-        section_header('Country Comparison', f'{metric_label} — Comparing up to 6 countries'),
+        section_header('Location Comparison', f'{metric_label} — Comparing up to 6 locations'),
         card([
             dcc.Graph(
-                figure=plot_trend_line(df, all_c, metric, title=f'{metric_label} — Country Comparison'),
+                figure=plot_trend_line(df, all_c, metric, title=f'{metric_label} — Location Comparison'),
                 style={'height': '450px'}, config=PLOTLY_CONFIG
             )
         ])
@@ -955,11 +1412,67 @@ def format_metric_value(value, metric):
     return f'{value:,.0f}'
 
 
-def make_deepdive_stats(country, metric, label):
+def is_rate_metric(metric):
+    rate_tokens = [
+        'per_hundred',
+        'per_million',
+        'positive_rate',
+        'stringency_index',
+        'reproduction_rate',
+        'rate',
+    ]
+    return any(token in metric for token in rate_tokens)
+
+
+def metric_value_format(metric):
+    if metric == 'reproduction_rate':
+        return ',.2f'
+    if any(token in metric for token in ['per_hundred', 'positive_rate', 'stringency_index', 'rate']):
+        return ',.1f'
+    if 'per_million' in metric:
+        return ',.1f'
+    return ',.0f'
+
+
+def metric_axis_title(metric, aggregation=None):
+    metric_name = next((m['label'] for m in METRICS if m['id'] == metric), metric.replace('_', ' ').title())
+    if aggregation:
+        return f'{aggregation} {metric_name}'
+    return metric_name
+
+
+def is_daily_count_metric(metric):
+    return metric in ('new_cases_smoothed', 'new_deaths_smoothed')
+
+
+def default_continent_aggregation(metric):
+    if is_daily_count_metric(metric):
+        return 'peak'
+    if is_rate_metric(metric):
+        return 'average'
+    return 'total'
+
+
+def normalize_continent_aggregation(metric, aggregation):
+    if is_daily_count_metric(metric):
+        return 'peak'
+    if not aggregation or aggregation == 'auto':
+        return default_continent_aggregation(metric)
+    if aggregation in ('peak', 'total', 'average'):
+        return aggregation
+    return default_continent_aggregation(metric)
+
+
+def make_deepdive_stats(country, metric, label, page_prefix=None):
     country_df = df[df['country'] == country][['date', metric]].copy()
     country_df = country_df.sort_values('date').dropna(subset=[metric])
     if country_df.empty:
-        return [stat_card('No Data', 'n/a', country)]
+        return [stat_card(
+            'No Data', 'n/a', country,
+            card_id=f'{page_prefix}-stat-no-data' if page_prefix else None,
+            explanation_key='no-data',
+            clickable=bool(page_prefix)
+        )]
 
     active_df = country_df[country_df[metric].fillna(0) != 0]
     stat_df = active_df if not active_df.empty else country_df
@@ -975,13 +1488,21 @@ def make_deepdive_stats(country, metric, label):
     max_growth = growth_df['growth_rate'].clip(upper=500).max() if not growth_df.empty else np.nan
 
     total_label = 'Total' if metric.startswith('new_') else 'Area'
+    def trend_stat_card(card_key, card_label, value, subtitle):
+        return stat_card(
+            card_label, value, subtitle,
+            card_id=f'{page_prefix}-stat-{card_key}' if page_prefix else None,
+            explanation_key=card_key,
+            clickable=bool(page_prefix)
+        )
+
     return [
-        stat_card('Latest Value', format_metric_value(latest[metric], metric), str(latest['date'].date())),
-        stat_card('Peak Value', format_metric_value(peak[metric], metric), str(peak['date'].date())),
-        stat_card('Average', format_metric_value(avg_value, metric), label),
-        stat_card(total_label, format_metric_value(total_or_area, metric), 'selected metric sum'),
-        stat_card('Latest Growth', f'{latest_growth:+.1f}%' if not pd.isna(latest_growth) else 'n/a', 'day over day'),
-        stat_card('Max Growth', f'{max_growth:+.1f}%' if not pd.isna(max_growth) else 'n/a', 'capped at 500%'),
+        trend_stat_card('latest-value', 'Latest Value', format_metric_value(latest[metric], metric), str(latest['date'].date())),
+        trend_stat_card('peak-value', 'Peak Value', format_metric_value(peak[metric], metric), str(peak['date'].date())),
+        trend_stat_card('average', 'Average', format_metric_value(avg_value, metric), label),
+        trend_stat_card('total-area', total_label, format_metric_value(total_or_area, metric), 'selected metric sum'),
+        trend_stat_card('latest-growth', 'Latest Growth', f'{latest_growth:+.1f}%' if not pd.isna(latest_growth) else 'n/a', 'day over day'),
+        trend_stat_card('max-growth', 'Max Growth', f'{max_growth:+.1f}%' if not pd.isna(max_growth) else 'n/a', 'capped at 500%'),
     ]
 
 
@@ -989,7 +1510,7 @@ def build_timeseries(metric, country):
     """Time Series tab: dual-axis chart only."""
     metric_label = next((m['label'] for m in METRICS if m['id'] == metric), metric)
     vacc_metric = 'people_fully_vaccinated_per_hundred'
-    stats_cards = make_deepdive_stats(country, metric, metric_label)
+    stats_cards = make_deepdive_stats(country, metric, metric_label, page_prefix='timeseries')
     return html.Div([
         html.Div(stats_cards, style={'display': 'grid', 'gridTemplateColumns': 'repeat(auto-fit, minmax(170px, 1fr))',
                                      'gap': '16px', 'marginBottom': '20px'}),
@@ -1003,7 +1524,7 @@ def build_timeseries(metric, country):
 def build_growth_rate_page(metric, country):
     """Growth Rate tab: standalone growth rate chart."""
     metric_label = next((m['label'] for m in METRICS if m['id'] == metric), metric)
-    stats_cards = make_deepdive_stats(country, metric, metric_label)
+    stats_cards = make_deepdive_stats(country, metric, metric_label, page_prefix='growthrate')
     return html.Div([
         html.Div(stats_cards, style={'display': 'grid', 'gridTemplateColumns': 'repeat(auto-fit, minmax(170px, 1fr))',
                                      'gap': '16px', 'marginBottom': '20px'}),
@@ -1018,11 +1539,18 @@ def build_rankings(metric):
     """Rankings tab."""
     metric_label = next((m['label'] for m in METRICS if m['id'] == metric), metric)
     top_df = top_countries(df, metric=metric, n=20)
+    value_format = metric_value_format(metric)
     return html.Div([
-        section_header('Rankings', f'Top 20 countries by {metric_label}'),
+        section_header('Rankings', f'Top 20 locations by {metric_label}'),
         card([
             dcc.Graph(
-                figure=plot_bar_chart(top_df, x_col='country', y_col=metric, title=f'Top 20 — {metric_label}', color_col='continent'),
+                figure=plot_bar_chart(
+                    top_df, x_col='country', y_col=metric,
+                    title=f'Top 20 — {metric_label}',
+                    color_col='continent',
+                    value_format=value_format,
+                    xaxis_title=metric_axis_title(metric)
+                ),
                 style={'height': '550px'}, config=PLOTLY_CONFIG
             )
         ])
@@ -1131,8 +1659,8 @@ def correlation_insight(x_metric, y_metric, color_col):
 
     if len(plot_df) < 3:
         return insight_panel(
-            f'The chart uses the latest available country record and compares {x_label} with {y_label}.',
-            'There are not enough valid countries to produce a reliable correlation reading.'
+        f'The chart uses the latest available location record and compares {x_label} with {y_label}.',
+            'There are not enough valid locations to produce a reliable correlation reading.'
         )
 
     corr = plot_df[[x_metric, y_metric]].corr().iloc[0, 1]
@@ -1148,7 +1676,7 @@ def correlation_insight(x_metric, y_metric, color_col):
     direction = 'positive' if corr > 0 else 'negative'
 
     process = (
-        f'Each point is one country using its latest available record. The scatter compares {x_label} on the X-axis '
+        f'Each point is one location using its latest available record. The scatter compares {x_label} on the X-axis '
         f'against {y_label} on the Y-axis, grouped by {color_label}. Countries with missing values are excluded.'
     )
     conclusion = (
@@ -1175,17 +1703,37 @@ def build_correlation(metric):
     ])
 
 
-def build_continent(metric):
+def build_continent(metric, aggregation='auto', sort_order='desc'):
     """Continent Analysis tab."""
     metric_label = next((m['label'] for m in METRICS if m['id'] == metric), metric)
-    latest = df.loc[df.groupby('country')['date'].idxmax()]
-    cont_df = latest.groupby('continent')[metric].agg(['sum', 'mean', 'max', 'count']).reset_index()
-    cont_df.columns = ['continent', 'total', 'average', 'maximum', 'count']
-    cont_df = cont_df.sort_values('total', ascending=True)
-    fig = plot_bar_chart(cont_df, x_col='continent', y_col='total',
-                         title=f'{metric_label} by Continent', color_col='continent')
+    aggregation = normalize_continent_aggregation(metric, aggregation)
+    sort_desc = sort_order != 'asc'
+
+    if aggregation == 'peak':
+        daily_continent_df = df.dropna(subset=['continent', metric]).groupby(['date', 'continent'])[metric].sum().reset_index()
+        cont_df = daily_continent_df.loc[daily_continent_df.groupby('continent')[metric].idxmax()].copy()
+        cont_df = cont_df.rename(columns={metric: 'value'})
+        aggregation_label = 'Peak'
+        subtitle_detail = 'historical daily peak'
+    else:
+        latest = df.loc[df.groupby('country')['date'].idxmax()]
+        cont_df = latest.groupby('continent')[metric].agg(['sum', 'mean', 'max', 'count']).reset_index()
+        aggregation_col = 'mean' if aggregation == 'average' else 'sum'
+        cont_df['value'] = cont_df[aggregation_col]
+        aggregation_label = 'Average' if aggregation == 'average' else 'Total'
+        subtitle_detail = 'latest location records'
+
+    cont_df = cont_df.sort_values('value', ascending=not sort_desc)
+    fig = plot_bar_chart(
+        cont_df, x_col='continent', y_col='value',
+        title=f'{aggregation_label} {metric_label} by Continent',
+        color_col='continent',
+        value_format=metric_value_format(metric),
+        xaxis_title=metric_axis_title(metric, aggregation_label),
+        sort_values=False
+    )
     return html.Div([
-        section_header('Continent Comparison', f'{metric_label} across continents'),
+        section_header('Continent Comparison', f'{aggregation_label} {metric_label} across continents · {subtitle_detail}'),
         card([dcc.Graph(figure=fig, style={'height': '400px'}, config=PLOTLY_CONFIG)])
     ])
 
@@ -1332,12 +1880,12 @@ def make_moving_average_outputs(country, metric, view_range='all', show_raw=True
     days_since_peak = max((latest['date'] - peak['date']).days, 0)
     trend_status, trend_detail, diff = ma_trend_summary(latest)
     stats_cards = [
-        stat_card('Latest Raw', f'{latest[base_metric]:,.0f}', value_label),
-        stat_card('7-Day MA', f'{latest["ma_7d"]:,.0f}', 'short-term'),
-        stat_card('30-Day MA', f'{latest["ma_30d"]:,.0f}', 'baseline'),
-        stat_card('7 vs 30', f'{diff:,.0f}', trend_detail),
-        stat_card('Peak 7-Day MA', f'{peak["ma_7d"]:,.0f}', str(peak['date'].date())),
-        stat_card('Trend', trend_status, f'{days_since_peak} days since peak'),
+        stat_card('Latest Raw', f'{latest[base_metric]:,.0f}', value_label, card_id='ma-stat-latest-raw', explanation_key='latest-raw', clickable=True),
+        stat_card('7-Day MA', f'{latest["ma_7d"]:,.0f}', 'short-term', card_id='ma-stat-7-day-ma', explanation_key='7-day-ma', clickable=True),
+        stat_card('30-Day MA', f'{latest["ma_30d"]:,.0f}', 'baseline', card_id='ma-stat-30-day-ma', explanation_key='30-day-ma', clickable=True),
+        stat_card('7 vs 30', f'{diff:,.0f}', trend_detail, card_id='ma-stat-7-vs-30', explanation_key='7-vs-30', clickable=True),
+        stat_card('Peak 7-Day MA', f'{peak["ma_7d"]:,.0f}', str(peak['date'].date()), card_id='ma-stat-peak-7-day-ma', explanation_key='peak-7-day-ma', clickable=True),
+        stat_card('Trend', trend_status, f'{days_since_peak} days since peak', card_id='ma-stat-trend', explanation_key='trend', clickable=True),
     ]
     return main_fig, window_fig, diff_fig, stats_cards
 
@@ -1449,7 +1997,7 @@ def make_fatality_outputs(country, compare_list=None):
     fig.add_trace(go.Bar(x=plot_df['date'], y=plot_df['fatality_gap'], name='Recent - cumulative', marker_color=np.where(plot_df['fatality_gap'].fillna(0) >= 0, '#dc2626', '#2563eb')), row=2, col=1)
     fig.add_hline(y=0, line_width=1, line_dash='dash', line_color='#777', row=2, col=1)
     fig.update_layout(
-        title=f'Fatality Trend Analysis - {country}' + (f' vs {len(compare_countries)} compare countries' if compare_countries else ''),
+        title=f'Fatality Trend Analysis - {country}' + (f' vs {len(compare_countries)} compare locations' if compare_countries else ''),
         template='plotly_white',
         height=620,
         margin={'l': 60, 'r': 24, 't': 62, 'b': 98},
@@ -1486,11 +2034,11 @@ def make_fatality_outputs(country, compare_list=None):
         subtitle = f'{gap:+.2f} pp vs cumulative'
 
     stats_cards = [
-        stat_card('Cumulative CFR', f'{latest["cumulative_cfr"]:.2f}%', 'all-time baseline'),
-        stat_card('Recent Fatality', f'{latest["recent_fatality_ratio"]:.2f}%' if not pd.isna(latest["recent_fatality_ratio"]) else 'n/a', '30-day deaths / 14-day lagged cases'),
-        stat_card('Fatality Gap', f'{gap:+.2f} pp' if not pd.isna(gap) else 'n/a', status),
-        stat_card('Peak Recent Ratio', f'{peak["recent_fatality_ratio"]:.2f}%' if not pd.isna(peak["recent_fatality_ratio"]) else 'n/a', str(peak['date'].date())),
-        stat_card('Total Deaths', f'{latest["total_deaths"]:,.0f}', subtitle),
+        stat_card('Cumulative CFR', f'{latest["cumulative_cfr"]:.2f}%', 'all-time baseline', card_id='fatality-stat-cumulative-cfr', explanation_key='cumulative-cfr', clickable=True),
+        stat_card('Recent Fatality', f'{latest["recent_fatality_ratio"]:.2f}%' if not pd.isna(latest["recent_fatality_ratio"]) else 'n/a', '30-day deaths / 14-day lagged cases', card_id='fatality-stat-recent-fatality', explanation_key='recent-fatality', clickable=True),
+        stat_card('Fatality Gap', f'{gap:+.2f} pp' if not pd.isna(gap) else 'n/a', status, card_id='fatality-stat-fatality-gap', explanation_key='fatality-gap', clickable=True),
+        stat_card('Peak Recent Ratio', f'{peak["recent_fatality_ratio"]:.2f}%' if not pd.isna(peak["recent_fatality_ratio"]) else 'n/a', str(peak['date'].date()), card_id='fatality-stat-peak-recent-ratio', explanation_key='peak-recent-ratio', clickable=True),
+        stat_card('Total Deaths', f'{latest["total_deaths"]:,.0f}', subtitle, card_id='fatality-stat-total-deaths', explanation_key='total-deaths', clickable=True),
     ]
     return fig, stats_cards
 
@@ -1559,10 +2107,6 @@ def get_cluster_df(k):
             clust_df['cluster'] = kmeans.fit_predict(scaled)
             CLUSTER_CACHE[k] = clust_df
     return CLUSTER_CACHE[k]
-
-
-for _cluster_k in range(3, 8):
-    get_cluster_df(_cluster_k)
 
 
 def make_cluster_outputs(k):
@@ -1692,7 +2236,7 @@ def update_global_stats(metric, slider_val):
     metric_label = next((m['label'] for m in METRICS if m['id'] == metric), metric)
     return [
         stat_card('Global Total', f'{total:,.0f}', metric_label),
-        stat_card('Average', f'{avg:,.1f}', 'per country'),
+        stat_card('Average', f'{avg:,.1f}', 'per location'),
         stat_card('Maximum', f'{mx:,.0f}', mx_country),
         stat_card('Countries', f'{date_df[metric].notna().sum():,}', 'with data')
     ]
@@ -1784,17 +2328,17 @@ def update_cluster(k):
     return fig, html.Div(summary_cards, style={'display': 'flex', 'gap': '16px', 'flexWrap': 'wrap'})
 
 
-# Overview tab: country filter + date range
-@app.callback(Output('data-table', 'data'), [Input('overview-country-filter', 'value'), Input('overview-date-range', 'start_date'), Input('overview-date-range', 'end_date')])
-def update_overview_table(country_filter, start_date, end_date):
-    filtered = df.copy()
-    if country_filter and country_filter != 'ALL':
-        filtered = filtered[filtered['country'] == country_filter]
-    if start_date:
-        filtered = filtered[filtered['date'] >= pd.Timestamp(start_date)]
-    if end_date:
-        filtered = filtered[filtered['date'] <= pd.Timestamp(end_date)]
-    return format_overview_table_records(filtered.head(100))
+# Overview tab: key metrics + country filter + date range
+@app.callback(
+    [Output('overview-key-metrics', 'children'),
+     Output('data-table', 'data')],
+    [Input('overview-country-filter', 'value'),
+     Input('overview-date-range', 'start_date'),
+     Input('overview-date-range', 'end_date')]
+)
+def update_overview_summary(country_filter, start_date, end_date):
+    filtered = filter_overview_data(country_filter, start_date, end_date)
+    return build_overview_key_metrics(country_filter, start_date, end_date), format_overview_table_records(filtered.head(100))
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1813,4 +2357,5 @@ app.clientside_callback(
 if __name__ == '__main__':
     print("Starting COVID-19 Data Explorer...")
     print(f"Open http://127.0.0.1:8051 in your browser")
+    start_data_loading_thread()
     app.run(debug=False, host='127.0.0.1', port=8051)
