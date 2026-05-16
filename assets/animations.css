@@ -266,6 +266,63 @@
   animation: subtitle-flow 600ms var(--ease-smooth) 150ms both;
 }
 
+.stat-card-clickable {
+  position: relative;
+  outline: 1px solid transparent;
+  transition:
+    transform var(--motion-fast) var(--ease-smooth),
+    box-shadow var(--motion-fast) var(--ease-smooth),
+    outline-color var(--motion-fast) var(--ease-smooth);
+}
+
+.stat-card-clickable:hover {
+  outline-color: rgba(37, 99, 235, 0.16);
+}
+
+.stat-card-clickable:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.38);
+  outline-offset: 2px;
+}
+
+.stat-card-details {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #9ca3af;
+  letter-spacing: 0;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition:
+    opacity var(--motion-fast) var(--ease-smooth),
+    transform var(--motion-fast) var(--ease-smooth),
+    color var(--motion-fast) var(--ease-smooth);
+}
+
+.stat-card-clickable:hover .stat-card-details,
+.stat-card-clickable:focus-visible .stat-card-details {
+  opacity: 1;
+  transform: translateY(0);
+  color: #2563eb;
+}
+
+.trend-stat-modal .modal-content {
+  border: 0;
+  border-radius: 12px;
+  box-shadow:
+    0 22px 48px rgba(15, 23, 42, 0.18),
+    0 8px 18px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
+.trend-stat-modal-section {
+  padding-bottom: 16px;
+}
+
+.trend-stat-modal-section + .trend-stat-modal-section {
+  padding-top: 2px;
+  border-top: 1px solid #f1f5f9;
+}
+
 #timeseries-chart .main-svg,
 #growthrate-chart .main-svg {
   contain: layout style;

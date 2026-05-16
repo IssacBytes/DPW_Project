@@ -21,7 +21,7 @@ echo.
 echo Open http://127.0.0.1:8051 in your browser
 echo.
 
-start "" http://127.0.0.1:8051
+start "" powershell -NoProfile -WindowStyle Hidden -Command "$url='http://127.0.0.1:8051'; for ($i=0; $i -lt 80; $i++) { try { Invoke-WebRequest -UseBasicParsing -Uri $url -TimeoutSec 1 | Out-Null; Start-Process $url; exit } catch { Start-Sleep -Milliseconds 500 } }; Start-Process $url"
 
 python app_extended.py
 
