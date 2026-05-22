@@ -33,9 +33,31 @@ from src.visualization import (
 import os
 import pickle
 import time
+import urllib.request
 
 DATA_PATH = 'compact.csv'
 CACHE_PATH = 'data_cache.pkl'
+
+def ensure_data_file():
+    if os.path.exists(DATA_PATH):
+        return
+
+    data_url = os.environ.get("DATA_URL")
+    if not data_url:
+        raise FileNotFoundError(
+            f"Required dataset '{DATA_PATH}' was not found. "
+            "Place compact.csv in the project root for local runs, or set the "
+            "DATA_URL environment variable on Render to a direct compact.csv download URL."
+        )
+
+    print(f"Downloading dataset from DATA_URL: {data_url}")
+    try:
+        urllib.request.urlretrieve(data_url, DATA_PATH)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to download dataset from DATA_URL '{data_url}': {exc}"
+        ) from exc
+    print(f"Dataset downloaded to {DATA_PATH}")
 
 print("Loading data...", end=' ', flush=True)
 t0 = time.time()
@@ -44,12 +66,7 @@ if os.path.exists(CACHE_PATH):
     with open(CACHE_PATH, 'rb') as f:
         df_raw, df = pickle.load(f)
 else:
-    if not os.path.exists(DATA_PATH):
-        raise FileNotFoundError(
-            f"Required dataset '{DATA_PATH}' was not found. "
-            "Add compact.csv to the project root before starting the app; "
-            "data_cache.pkl is optional and can be regenerated from compact.csv."
-        )
+    ensure_data_file()
     # Use the team member's CovidDataPreprocessor for cleaning
     print("Running full preprocessing pipeline...")
     processor = CovidDataPreprocessor(DATA_PATH)

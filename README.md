@@ -122,15 +122,20 @@ app.run(debug=False, host='127.0.0.1', port=8051)
 
 The deployable Dash entry point is `app.py`. It exposes the Flask server as `server = app.server`, so production platforms can start the app with Gunicorn.
 
+`compact.csv` is not committed to the repository because it is a large data file. For local runs, place `compact.csv` in the project root manually. For Render, set `DATA_URL` to a direct download link for `compact.csv`; the app will download it automatically when `data_cache.pkl` is not present.
+
 ### Render deployment configuration
 
 - Runtime: Python
 - Build Command: `pip install -r requirements.txt`
 - Start Command: `gunicorn app:server`
-- Branch: `main`
+- Branch: `web_version`
 - Main app entry: `app.py`
+- Environment Variable: `DATA_URL=<direct compact.csv download URL>`
 
 ### Local deployment test
+
+Make sure `compact.csv` exists in the project root, then run:
 
 Run from the project root:
 
