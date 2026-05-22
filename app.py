@@ -44,6 +44,12 @@ if os.path.exists(CACHE_PATH):
     with open(CACHE_PATH, 'rb') as f:
         df_raw, df = pickle.load(f)
 else:
+    if not os.path.exists(DATA_PATH):
+        raise FileNotFoundError(
+            f"Required dataset '{DATA_PATH}' was not found. "
+            "Add compact.csv to the project root before starting the app; "
+            "data_cache.pkl is optional and can be regenerated from compact.csv."
+        )
     # Use the team member's CovidDataPreprocessor for cleaning
     print("Running full preprocessing pipeline...")
     processor = CovidDataPreprocessor(DATA_PATH)
@@ -741,5 +747,6 @@ app.clientside_callback(
 # ============================================================================
 if __name__ == '__main__':
     print("Starting COVID-19 Data Explorer...")
-    print(f"Open http://127.0.0.1:8050 in your browser")
-    app.run(debug=False, host='127.0.0.1', port=8050)
+    port = int(os.environ.get("PORT", 8050))
+    print(f"Open http://127.0.0.1:{port} in your browser for local testing")
+    app.run(debug=False, host='0.0.0.0', port=port)

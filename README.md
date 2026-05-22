@@ -1,183 +1,369 @@
-# COVID-19 数据探索平台
+# COVID-19 Data Explorer
 
-基于 Python Dash 和 Plotly 构建的全球 COVID-19 数据分析和可视化平台。
+COVID-19 Data Explorer is an interactive Dash and Plotly dashboard for exploring the Our World in Data COVID-19 dataset. The current application entry point is `app_extended.py`. It provides data loading, cleaning, summary statistics, map-based global trends, country and continent comparison, time-series analysis, relationship analysis, and advanced analytical views.
 
-## 数据集
+## Project Overview
 
-- **来源**: Our World in Data (OWID) COVID-19 数据集
-- **文件**: `compact.csv`
-- **记录数**: 570,606 行，覆盖 262 个国家/地区
-- **日期范围**: 2020-01-01 至 2026-02-22
-- **特征**: 67 列，包括病例、死亡、疫苗接种、检测和政策指标
+The project is a browser-based Python web application. It loads the COVID-19 CSV dataset, preprocesses it with reusable cleaning code, caches the cleaned DataFrame for faster startup, and renders interactive analytical pages through Dash callbacks.
 
-## 快速启动
+Main technologies:
 
-### 方法一：双击运行（推荐）
+| Technology | Purpose |
+| --- | --- |
+| Dash | Web application framework |
+| dash-bootstrap-components | UI components and layout support |
+| Plotly | Interactive charts and maps |
+| pandas | Data loading, cleaning, grouping, and tabular analysis |
+| numpy | Numeric calculation and fast filtering |
+| scikit-learn | Standardization and KMeans clustering |
 
-1. 打开项目文件夹 `d:\Share\资料\y2s2\DPW\Project`
-2. 双击 **`run.bat`**
-3. 等待终端显示 `Dash is running on http://127.0.0.1:8050/`
-4. 浏览器会自动打开页面
+## Dataset
 
-### 方法二：命令行运行
+The app expects the dataset file to be available at the project root:
 
-```bash
-cd d:\Share\资料\y2s2\DPW\Project
+```text
+compact.csv
+```
+
+Current dataset characteristics used by the project:
+
+| Item | Value |
+| --- | --- |
+| Source | Our World in Data COVID-19 dataset |
+| Rows | 570,606 |
+| Countries or regions | 262 |
+| Date range | 2020-01-01 to 2026-02-22 |
+| Main cache file | `data_cache.pkl` |
+
+`data_cache.pkl` is generated from `compact.csv` after preprocessing. If the source dataset is changed, delete `data_cache.pkl` and restart the application so the cache can be rebuilt.
+
+## Submission Notes
+
+If the submission file size exceeds the upload limit:
+
+- The original dataset should not be included.
+- A cleaned dataset is optional.
+- The data cleaning code must still be included. In this project, the cleaning workflow is implemented in `src/data_cleaner.py`.
+- `data_cache.pkl` is a generated cache file and can be omitted from submission. It can be rebuilt from `compact.csv`.
+- No pre-trained model is used in this project.
+- No self-trained or fine-tuned model is used. Clustering is computed at runtime with KMeans from scikit-learn.
+- External package references are listed in the "External Package References" section below.
+
+The final report must specify the contribution of every group member. This README does not invent member names or contribution percentages; those details should be filled in the report by the group.
+
+Only the group leader should submit the final shared submission. If a newer version is uploaded, do not remove the existing submission unless the course platform explicitly requires it.
+
+## Environment Setup
+
+Recommended environment:
+
+- Windows 10 or later
+- Python 3.10 or later
+- A local browser such as Chrome, Edge, or Firefox
+
+Create and activate a virtual environment from the project root:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\activate
+```
+
+Install dependencies:
+
+```powershell
+pip install -r requirements.txt
+```
+
+The dependency file currently contains:
+
+```text
+pandas>=2.0.0
+numpy>=1.24.0
+plotly>=5.15.0
+dash>=2.14.0
+dash-bootstrap-components>=1.5.0
+scikit-learn>=1.3.0
+gunicorn
+```
+
+## Running the Application
+
+### Option 1: Windows launcher
+
+Double-click:
+
+```text
+run_extended.bat
+```
+
+The script activates `.venv`, starts the Dash server, and opens the browser when the server is ready.
+
+### Option 2: Command line
+
+Run from the project root:
+
+```powershell
+.\.venv\Scripts\python.exe app_extended.py
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8051
+```
+
+The app runs with:
+
+```python
+app.run(debug=False, host='127.0.0.1', port=8051)
+```
+
+## Online Deployment
+
+The deployable Dash entry point is `app.py`. It exposes the Flask server as `server = app.server`, so production platforms can start the app with Gunicorn.
+
+### Render deployment configuration
+
+- Runtime: Python
+- Build Command: `pip install -r requirements.txt`
+- Start Command: `gunicorn app:server`
+- Branch: `main`
+- Main app entry: `app.py`
+
+### Local deployment test
+
+Run from the project root:
+
+```powershell
 python app.py
 ```
 
-然后在浏览器中访问 http://127.0.0.1:8050
+Then open:
 
-### 首次启动说明
-
-- **第一次运行**：需要加载 CSV 文件并生成缓存（约 3-5 秒）
-- **后续运行**：直接从缓存读取，只需 **0.5 秒**
-- 如果更新了数据集，请删除 `data_cache.pkl` 文件重新生成缓存
-
-## 功能特性
-
-### 1. 数据管道 (Data Pipeline)
-展示数据从加载到清洗的完整流程。
-
-- **数据加载**: 显示源文件信息、总行数（570,606）、总列数（67）、日期范围
-- **数据清洗**: 列出清洗操作（去重、排序、前向填充缺失值），并对比清洗前后的行数和缺失值数量
-- **列概览**: 表格列出所有列的名称、数据类型、非空/空值计数和前3个示例值
-
-### 2. 概览 (Overview)
-快速了解数据集整体情况。
-
-- **统计卡片**: 显示国家总数（262）、日期范围、总行数、当前选中指标的全球总计
-- **数据表格**: 可翻页查看前100行数据，包含国家、日期、大洲、新增病例、新增死亡、疫苗接种率等关键字段
-
-### 3. 全球趋势 (Global Trends)
-通过地图和时间轴观察疫情在全球的时空演变。
-
-- **世界地图（Choropleth Map）**:
-  - 颜色越深表示该指标数值越高
-  - 鼠标悬停可查看具体国家的数值
-  - 地图随下方时间轴滑块联动更新
-- **时间轴滑块**:
-  - 拖动滑块选择日期，地图和趋势图同步更新
-  - 点击 ▶ Play 按钮自动播放，观察疫情随时间的变化过程
-- **趋势图（折线图）**:
-  - X轴为时间，Y轴为指标数值
-  - 显示选定国家从疫情开始到当前选中日期的趋势
-  - 多条折线可对比不同国家
-- **全球统计面板**:
-  - 显示选中日期的全球总计、各国平均值、最大值及对应国家、有数据的国家数量
-
-### 4. 国家对比 (Country Comparison)
-对比多个国家在同一指标上的表现。
-
-- **折线图**:
-  - 每条线代表一个国家，颜色不同便于区分
-  - X轴为完整时间线，Y轴为指标数值
-  - 鼠标悬停可查看具体日期和数值
-  - 最多同时对比6个国家
-  - 适合观察不同国家在疫情走势上的异同
-
-### 5. 国家深度分析 (Country Deep Dive)
-深入分析单个国家的疫情数据。
-
-- **双轴图（Dual-Axis Chart）**:
-  - 左Y轴：选中的指标（如新增病例）
-  - 右Y轴：疫苗接种率（%）
-  - X轴为时间线
-  - 用于观察指标变化与疫苗接种之间的关系
-  - 例如：疫苗接种率上升后，新增病例是否下降
-- **增长率分析图**:
-  - 显示指标的日变化量（柱状图）和增长率（折线图）
-  - 柱状图：每天的新增/减少量
-  - 折线图：环比增长率百分比
-  - 用于判断疫情是处于上升期还是下降期
-
-### 6. 排名 (Rankings)
-查看各国在选定指标上的排名。
-
-- **水平柱状图**:
-  - Y轴为国家名称，X轴为指标数值
-  - 按数值从高到低排列，显示前20名
-  - 柱子颜色按大洲区分（亚洲、欧洲、非洲等）
-  - 鼠标悬停可查看具体数值和大洲
-  - 适合快速找出表现最好/最差的国家
-
-### 7. 相关性 (Correlation)
-探索两个指标之间的关联性。
-
-- **散点图（Scatter Plot）**:
-  - X轴为选中的指标，Y轴为自动匹配的相关指标
-  - 每个点代表一个国家
-  - 点颜色按大洲区分
-  - 鼠标悬停可查看国家名称和具体数值
-  - 例如：新增病例 vs 新增死亡，观察死亡率是否与病例数相关
-  - 点的分布趋势可判断正相关、负相关或无相关
-
-### 8. 大洲分析 (Continent Analysis)
-从大洲维度观察疫情分布。
-
-- **水平柱状图**:
-  - Y轴为大洲名称，X轴为指标总量
-  - 按总量从低到高排列
-  - 每个大洲使用不同颜色
-  - 鼠标悬停可查看具体数值
-  - 适合比较不同大洲的疫情严重程度
-
-## 图表交互操作
-
-所有图表右上角都有简洁的工具栏，方便交互：
-
-| 按钮 | 功能 | 操作方式 |
-|------|------|----------|
-| ✋ 平移 | 拖动移动图表视图 | 点击后拖动画布 |
-| 🔍 框选缩放 | 放大指定区域 | 点击后框选区域 |
-| 🔄 重置 | 恢复默认视图 | 点击即可 |
-
-## 全局控件说明
-
-- **指标下拉框**: 选择要可视化的指标（新增病例、新增死亡、疫苗接种率等12个指标）
-- **国家下拉框**: 选择主要分析的国家
-- **对比下拉框**: 选择要对比的其他国家（可多选）
-- **时间轴滑块**: 在全球趋势标签页中拖动选择日期
-- **播放按钮**: 自动播放时间动画
-- **退出按钮**: 关闭浏览器标签页
-
-## 项目结构
-
+```text
+http://127.0.0.1:8050
 ```
+
+For cloud-style local testing, set `PORT` before starting the app:
+
+```powershell
+$env:PORT=8055
+python app.py
+```
+
+Then open `http://127.0.0.1:8055`.
+
+### Custom domain
+
+After the Render service is live, add a Custom Domain in Render, for example:
+
+```text
+dpw.issacbytes.com
+```
+
+In Cloudflare DNS, add a CNAME record:
+
+```text
+Name: dpw
+Target: Render-provided target domain
+Proxy status: DNS only, or as required by Render
+```
+
+## First Launch and Cache Behavior
+
+On first launch, the app loads `compact.csv`, cleans the data, prepares derived fields, and writes `data_cache.pkl`. Later launches use the cache for faster startup.
+
+To force a full reload:
+
+1. Stop the running Dash server.
+2. Delete `data_cache.pkl`.
+3. Start `app_extended.py` again.
+
+## Project Structure
+
+```text
 covid19-data-explorer/
-├── run.bat                 # 启动入口（双击运行）
-├── app.py                  # 主应用入口
-├── compact.csv             # COVID-19 数据集
-├── data_cache.pkl          # 数据缓存（自动生成）
-├── requirements.txt        # Python 依赖
-├── README.md               # 本文件
-├── src/
-│   ├── __init__.py         # 包初始化
-│   ├── data_loader.py      # 数据加载函数
-│   ├── data_cleaner.py     # 数据清洗函数
-│   ├── data_analysis.py    # 统计分析函数
-│   └── visualization.py    # Plotly 可视化函数
-└── output/
-    └── figures/            # 生成的图表（可选）
+|-- app_extended.py              # Main Dash application
+|-- run_extended.bat             # Windows launcher for the extended app
+|-- requirements.txt             # Python dependencies
+|-- compact.csv                  # Required source dataset, if included locally
+|-- compact_cleaned.csv          # Optional cleaned dataset
+|-- data_cache.pkl               # Generated preprocessing cache
+|-- assets/
+|   `-- animations.css           # UI animation and styling support
+|-- src/
+|   |-- data_loader.py           # Dataset loading and metadata helpers
+|   |-- data_cleaner.py          # Data preprocessing and cleaning workflow
+|   |-- data_analysis.py         # Descriptive statistics and ranking helpers
+|   |-- advanced_analysis.py     # Moving average, anomalies, CFR, lag, clustering
+|   `-- visualization.py         # Plotly chart and map generation
+|-- docs/                        # Design and module documentation
+`-- tools/                       # Report/document generation helper scripts
 ```
 
-## 依赖
+## Application Guide
 
-- **pandas** - 数据处理与分析
-- **numpy** - 数值计算
-- **plotly** - 交互式可视化
-- **dash** - Web 应用框架
-- **dash-bootstrap-components** - UI 组件
+The extended GUI uses a collapsible sidebar. Global controls at the top select the main metric, primary country, and comparison countries. Some pages use all global controls, while pages such as Fatality Trend and Clustering use fixed analysis inputs where the global metric is not needed.
 
-## 技术亮点
+### Overview
 
-- **性能优化**: 使用二分查找 (`np.searchsorted`) 实现 57 万行数据的快速日期过滤
-- **启动加速**: 使用 pickle 缓存处理后的数据，二次启动仅需 0.5 秒
-- **响应式设计**: OWID 风格简洁界面，适配不同屏幕
-- **实时交互**: 通过 Dash 回调实现实时数据更新
-- **模块化架构**: 数据加载、清洗、分析和可视化分离为独立模块
+**Global Trends**
 
-## 团队
+- Displays a world choropleth map for the selected metric and date.
+- Includes a timeline slider and Play button for observing global changes over time.
+- Shows global summary cards and a trend chart for selected comparison countries.
 
-- 课程: 软件开发实践 II
-- 数据集: Our World in Data COVID-19
+**Summary Statistics**
+
+- Shows dataset-level summary cards such as total countries, date range, row count, and global total for the selected metric.
+- Includes key metrics and a filterable country summary table.
+
+**Pandemic Timeline**
+
+- Documents the data pipeline from loading to cleaning.
+- Shows source file information, cleaning summary, and column metadata.
+
+### Comparison Analysis
+
+**Country Comparison**
+
+- Compares the selected country with selected comparison countries.
+- Uses a multi-line time-series chart for the selected metric.
+
+**Continent Comparison**
+
+- Aggregates the selected metric by continent.
+- Supports continent-level comparison rather than country-level comparison.
+
+**Rankings**
+
+- Shows the top countries for the selected metric.
+- Uses a horizontal bar chart colored by continent.
+
+### Trend Analysis
+
+**Time Series**
+
+- Focuses on the selected country and metric over time.
+- Includes summary cards for the displayed series.
+
+**Moving Average**
+
+- Uses a more interpretable daily baseline for smoothed or cumulative metrics.
+- Shows trend overview, moving-average window comparison, momentum, and peak summary.
+- Helps identify whether the short-term trend is rising, falling, or stable.
+
+**Growth Rate**
+
+- Shows value and growth-rate views for the selected country and metric.
+- Adds summary cards for the displayed trend data.
+
+**Fatality Trend**
+
+- Analyzes case fatality rate behavior using cumulative CFR and recent fatality ratio.
+- Supports comparison countries where relevant.
+- This page is independent of the global metric selector because fatality rate is computed from cases and deaths.
+
+### Relationship Analysis
+
+**Correlation**
+
+- Compares two selected indicators in a scatter plot.
+- Supports coloring countries by continent, population group, GDP level, median age group, HDI level, or life expectancy group.
+- Includes a simple analysis process and conclusion text in English.
+
+**Lead-Lag Analysis**
+
+- Computes cross-lag correlation between two selected indicators for the selected country.
+- Helps explore whether one signal tends to lead or lag another signal.
+- Includes a simple analysis process and conclusion text in English.
+
+### Advanced Analytics
+
+**Clustering**
+
+- Groups countries using KMeans based on latest per-country metrics.
+- Uses total cases per million, total deaths per million, fully vaccinated percentage, and population.
+- Provides cluster scatter output and cluster summary cards.
+
+**Anomaly Detection**
+
+- Detects unusual spikes or drops using rolling mean and rolling standard deviation.
+- Lets the user adjust rolling window and anomaly threshold.
+
+## Data Cleaning Workflow
+
+The cleaning workflow is implemented in `src/data_cleaner.py` through `CovidDataPreprocessor`.
+
+Main steps include:
+
+- Load CSV data with pandas.
+- Standardize column names.
+- Remove duplicate rows.
+- Trim and standardize text fields.
+- Convert date fields to datetime.
+- Convert numeric fields to numeric types.
+- Drop rows missing essential identifiers.
+- Remove impossible negative cumulative values.
+- Prepare a cleaned DataFrame for dashboard analysis.
+
+## External Package References
+
+This project uses external open-source packages:
+
+- pandas: https://pandas.pydata.org/
+- numpy: https://numpy.org/
+- Plotly: https://plotly.com/python/
+- Dash: https://dash.plotly.com/
+- dash-bootstrap-components: https://dash-bootstrap-components.opensource.faculty.ai/
+- scikit-learn: https://scikit-learn.org/
+
+Dataset reference:
+
+- Our World in Data COVID-19 dataset: https://ourworldindata.org/coronavirus
+
+## Troubleshooting
+
+**`compact.csv` is missing**
+
+Place `compact.csv` in the project root, or update `DATA_PATH` in `app_extended.py` to point to the dataset location.
+
+**The app still shows old data**
+
+Stop the server, delete `data_cache.pkl`, and restart the app.
+
+**Port 8051 is already in use**
+
+Stop the other process using the port, or change the port in the final `app.run(...)` call in `app_extended.py`.
+
+**Dependencies are missing**
+
+Activate the virtual environment and run:
+
+```powershell
+pip install -r requirements.txt
+```
+
+**The browser does not show the latest UI**
+
+Refresh the browser page. If needed, stop and restart `app_extended.py`.
+
+## Verification Commands
+
+Run a syntax check:
+
+```powershell
+.\.venv\Scripts\python.exe -m py_compile app_extended.py
+```
+
+Start the app:
+
+```powershell
+.\.venv\Scripts\python.exe app_extended.py
+```
+
+Open:
+
+```text
+http://127.0.0.1:8051
+```
